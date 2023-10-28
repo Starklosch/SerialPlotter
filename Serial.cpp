@@ -1,5 +1,6 @@
 #include "Serial.h"
 #include <format>
+#include <algorithm>
 
 void printErrorMessage(DWORD error) {
 	static WCHAR messageBuffer[128];
@@ -19,6 +20,31 @@ void printErrorMessage(DWORD error) {
 	WriteConsoleW(out, messageBuffer, size, 0, 0);
 	//std::cout.write(messageBuffer, size);
 	//std::cout << '\n';
+}
+
+std::vector<std::string> EnumerateComPorts() {
+	std::vector<std::string> com_ports;
+
+	HKEY key;
+	LSTATUS result = RegOpenKeyExA(HKEY_LOCAL_MACHINE, "HARDWARE\\DEVICEMAP\\SERIALCOMM", 0, KEY_QUERY_VALUE, &key);
+	if (result != ERROR_SUCCESS)
+		return com_ports;
+
+	for (DWORD i = 0; result != ERROR_NO_MORE_ITEMS; i++)
+	{
+		char name[64];
+		uint8_t data[64];
+		DWORD nameChars = 64, dataSize = 64;
+		DWORD type;
+		result = RegEnumValueA(key, i, name, &nameChars, 0, &type, data, &dataSize);
+
+		if (result == ERROR_SUCCESS)
+			com_ports.emplace_back((char*)data);
+	}
+	RegCloseKey(key);
+
+	std::sort(com_ports.begin(), com_ports.end());
+	return com_ports;
 }
 
 Serial::~Serial() {
@@ -157,6 +183,7 @@ int Serial::write_overlapped(uint8_t* buffer, int size) {
 
 void Serial::close() {
 	CloseHandle(file);
+	file = nullptr;
 }
 
 size_t Serial::available()

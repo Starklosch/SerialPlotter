@@ -7,10 +7,6 @@
 // - Documentation        https://dearimgui.com/docs (same as your local docs/ folder).
 // - Introduction, links and more at the top of imgui.cpp
 
-//#include <kfr/base.hpp>
-//#include <kfr/dft.hpp>
-//#include <kfr/dsp.hpp>
-//#include <kfr/io.hpp>
 #include <fftw3.h>
 
 #include "imgui.h"
@@ -37,8 +33,10 @@
 #include <queue>
 #include <fstream>
 #include <chrono>
-#include "Serial.h"
 #include <imgui_internal.h>
+#include "Serial.h"
+#include "Buffers.h"
+#include "Monitor.h"
 //#include <math.h>
 
 double magnitude(fftw_complex complex) {
@@ -75,38 +73,6 @@ int MetricFormatter(double value, char* buff, int size, void* data) {
 
 using namespace std::chrono_literals;
 using namespace std::string_literals;
-
-#include "Buffers.h"
-
-std::vector<std::string> EnumerateComPorts() {
-	std::vector<std::string> com_ports;
-
-	HKEY key;
-	LSTATUS result = RegOpenKeyExA(HKEY_LOCAL_MACHINE, "HARDWARE\\DEVICEMAP\\SERIALCOMM", 0, KEY_QUERY_VALUE, &key);
-	if (result != ERROR_SUCCESS)
-		return com_ports;
-
-	for (DWORD i = 0; result != ERROR_NO_MORE_ITEMS; i++)
-	{
-		char name[64];
-		uint8_t data[64];
-		DWORD nameChars = 64, dataSize = 64;
-		DWORD type;
-		result = RegEnumValueA(key, i, name, &nameChars, 0, &type, data, &dataSize);
-		//if (error == ERROR_SUCCESS) {
-		//	std::cout << name << " (" << typeToString(type) << "):\n";
-		//	printTypeValue(type, data, dataSize);
-		//	std::cout << '\n';
-		//}
-
-		if (result == ERROR_SUCCESS)
-			com_ports.emplace_back((char*)data);
-	}
-	RegCloseKey(key);
-
-	std::sort(com_ports.begin(), com_ports.end());
-	return com_ports;
-}
 
 bool Button(const char *label, bool disabled = false) {
 	if (disabled) {
@@ -151,11 +117,11 @@ void monitor_test() {
 	int read = 0;
 
 	monitor.start("COM5", 38400);
-	
+
 	std::this_thread::sleep_for(1s);
 
 	int available = monitor.available();
-	
+
 	time_point start = clock::now(), now;
 	read = monitor.read(buff.data(), available);
 	now = clock::now();
@@ -165,12 +131,33 @@ void monitor_test() {
 	std::cout << std::format("{} bytes still available\n", monitor.available());
 }
 
+void interval() {
+	using clock = std::chrono::high_resolution_clock;
+	using time_point = clock::time_point;
+	using duration = std::chrono::duration<double>;
+
+	time_point start = clock::now();
+	for (size_t i = 0; i < 10; i++)
+	{
+		time_point next = start + 1s;
+		std::this_thread::sleep_until(next);
+		std::cout << "Now: " << duration(clock::now() - start).count() << '\n';
+		start = next;
+	}
+}
+
+
 // Main code
 int main(int, char**)
 {
-	monitor_test(); return 0;
+	using clock = std::chrono::high_resolution_clock;
+	using time_point = clock::time_point;
+	using duration = std::chrono::duration<double>;
 
-	const int N = 1024;
+	const int muestras = 3840;
+
+	float frecuencia_muestreo = 3840;
+
 	fftw_complex* out; /* Output */
 	fftw_plan p; /* Plan */
 
@@ -187,30 +174,17 @@ int main(int, char**)
 	 *
 	 * In both cases the items following the first N/2+1 are redundant.
 	 */
-	const int out_N = N / 2 + 1;
+	const int out_N = muestras / 2 + 1;
 	out = (fftw_complex*)fftw_malloc(sizeof(fftw_complex) * out_N);
 
-	std::vector<double> in(N);
-	std::vector<double> in_x(N);
+	std::vector<double> in(muestras);
+	std::vector<double> in_x(muestras);
 	std::vector<double> fourier(out_N);
 	std::vector<double> fourier_x(out_N);
-	p = fftw_plan_dft_r2c_1d(N, in.data(), out, FFTW_ESTIMATE);
+	p = fftw_plan_dft_r2c_1d(muestras, in.data(), out, FFTW_ESTIMATE);
 
 	for (size_t i = 0; i < out_N; i++)
-		fourier_x[i] = i;
-
-	//for (size_t i = 0; i < N; i++)
-	//	in_x[i] = i / (float)N;
-
-	//double pi = 3.14159265359;
-	//for (int i = 0; i < N; i++)
-	//	in[i] = 3 * sin(2 * pi * i / (double)N) + sin(2 * pi * 4 * i / (double)N) + 0.5 * sin(2 * pi * 7 * i / (double)N);
-
-	//fftw_execute(p);
-
-	//for (int i = 0; i < out_N; i++)
-	//	fourier[i] = magnitude(out[i]);
-
+		fourier_x[i] = i * frecuencia_muestreo / muestras;
 
 	glfwSetErrorCallback(glfw_error_callback);
 	if (!glfwInit())
@@ -287,7 +261,7 @@ int main(int, char**)
 
 	const float e = 2.71828182846f;
 
-	int selected_baud = 38400;
+	int selected_baud = frecuencia_muestreo * 10;
 
 	int max_time = 60;
 	int read_frequency = 30;
@@ -302,166 +276,138 @@ int main(int, char**)
 
 	//std::cout << std::format("Factor {} Max {} Min {} Show_time {}\n", factor, max_time_scale, min_time_scale, show_time);
 
-	int speed, each, max_size, size = 0, view_size = 0;
+	int speed, max_size, view_size = 0;
+	size_t size = 0;
 
-	uint8_t* read_buffer = nullptr;
-	//Buffer<uint8_t>* write_buffer = nullptr;
+	std::vector<uint8_t> read_buffer, write_buffer;
 
 	ScrollBuffer<double>* scrollX = nullptr, * scrollY = nullptr;
+	ScrollBuffer<double>* out_scrollX = nullptr, * out_scrollY = nullptr;
 	float* xs = 0, * ys = 0;
+	float next_time = 0;
 
 	const auto destroy_buffers = [&] {
-		delete[] read_buffer;
 		delete scrollX;
 		delete scrollY;
+		delete out_scrollX;
+		delete out_scrollY;
 		delete[] xs;
 		delete[] ys;
 	};
 
 	const auto init_buffers = [&] {
 		speed = selected_baud / 10;
-		each = speed / read_frequency;
 		max_size = speed * max_time;
 		size = 0;
 		view_size = max_time_visible * speed;
+		next_time = 0;
 		std::cout << std::format("Speed: {}\n", speed);
 
 		destroy_buffers();
-		read_buffer = new uint8_t[each];
+		read_buffer.resize(1024);
+		write_buffer.resize(1024);
 		scrollX = new ScrollBuffer<double>(max_size, view_size);
 		scrollY = new ScrollBuffer<double>(max_size, view_size);
+		out_scrollX = new ScrollBuffer<double>(max_size, view_size);
+		out_scrollY = new ScrollBuffer<double>(max_size, view_size);
 		xs = new float[view_size];
 		ys = new float[view_size];
 	};
 
 	init_buffers();
 
-	Monitor monitor(16 * 1024, 2 * 1024, 1024);
-	Serial serial;
+	Monitor monitor(16 * 1024, 4 * 1024, 1024);
 	bool run_receive = true, run_transmission = true, serial_started = false;
 	bool show = true;
 
 	std::string selected_port;
 	std::string selected_baud_str = std::to_string(selected_baud);
 
-	float start_time = 0;
+	time_point start_time = clock::now();
 
-	float last_time = 0;
-	float elapsed_time = offset;
 	bool avanzar = true;
 	int draw_size = 0;
-	int maximo = 255, minimo = 0;
-	float frecuencia_muestreo = 960;
+	int maximo = 0, minimo = 255;
 
 	//std::ofstream log("C:/Users/usuario/Desktop/log.txt");
 
-	auto receive = [&] {
-		// 60 - 130
-		// 10 - 60
-		// (x - 10) / (60 - 10) * 12 - 6
-		float factor = 12 / 255.f;
-		using clock = std::chrono::high_resolution_clock;
-		using time_point = clock::time_point;
-		using duration = std::chrono::duration<double>;
-		time_point start = clock::now(), last_time;
-		int times = 0;
-		bool show = true;
-		int last_read = 0;
-		while (run_receive) {
-			if (!serial_started) {
-				times = 0;
-				start = clock::now();
-				last_time = start;
-				last_read = 0;
-
-
-				continue;
-			}
-
-			//std::cout << std::format("{} bytes available\n", serial.available());
-			int read = serial.read(read_buffer, each);
-			//std::cout << std::format("{} bytes read\n", read);
-			//std::cout << std::format("{} read\n", read);
-			//write_buffer->write(read_buffer, read);
-
-			//float now = ImGui::GetTime();
-			//float elapsed = now - last_time;
-			auto now = clock::now();
-			auto relative_time = duration(now - start);
-			float elapsed = duration(now - last_time).count();
-			float last_relative_time = duration(last_time - start).count();
-			//times++;
-
-			//if (duration.count() > 1 && show) {
-			//	std::cout << std::format("{} times in {} s\n", times, duration.count());
-			//	show = false;
-			//}
-
-
-			for (size_t i = 0; i < read; i++)
-			{
-				//ysbuf[size + i] = buffer[i] * factor - 6;
-				scrollY->push((read_buffer[i] - minimo) / (float)(maximo - minimo) * 12 - 6);
-				//buffer[i] = buffer[i] * factor - 6;
-			}
-			for (size_t i = 0; i < last_read; i++)
-			{
-				scrollX->push(last_relative_time + i * elapsed / last_read);
-				//std::cout << last_relative_time + i * elapsed / read << ", ";
-			}
-			//if (speed <= scrollX->size() && show) {
-			//	show = false;
-			//}
-			last_time = now;
-			last_read = read;
-			//ysbuf.write(buffer, read);
-			
-			size = scrollX->count();
-		}
+	std::function<double(double)> filtro;
+	const std::function<double(uint8_t)> transformacion = [&](uint8_t v) {
+		return (v - minimo) / (double)(maximo - minimo) * 12 - 6;
+	};
+	const std::function<int(double)> transformacion_inversa = [&](double v) {
+		double resultado = round((v + 6) * (maximo - minimo) / 12.0 + minimo);
+		if (resultado < 0)
+			return 0;
+		if (resultado > 255)
+			return 255;
+		return (int)resultado;
 	};
 
-	//const float pi = 3.14159265359f;
-	//float signal_buffer[512];
-	//for (int i = 0; i < 512; i++)
-	//{
-	//	signal_buffer[i] = sin(2 * pi * i);
-	//}
-	
+	int max = 0;
+	monitor.read_callback = [&](int available) {
+		int read = monitor.read(read_buffer.data(), read_buffer.size());
 
+		for (size_t i = 0; i < read; i++)
+		{
+			double resultado = transformacion(read_buffer[i]);
+			if (filtro)
+				resultado = filtro(resultado);
 
-	//auto transmit = [&] {
-	//	// 60 - 130
-	//	// 10 - 60
-	//	// (x - 10) / (60 - 10) * 12 - 6
-	//	float factor = 12 / 255.f;
-	//	uint32_t it = 0;
-	//	while (run_transmission) {
-	//		if (!serial_started)
-	//			continue;
+			scrollY->push(resultado);
+			scrollX->push(next_time);
 
-	//		int size = write_buffer->size();
-	//		if (size > 0)
-	//			serial.write(write_buffer->data(), size);
-	//	}
-	//};
+			// Filtro
+			out_scrollY->push(resultado);
+			out_scrollX->push(next_time);
+			next_time += 1 / frecuencia_muestreo;
 
-	std::thread fetch_thread(receive);
-	float left_limit = 0, right_limit = max_time_visible;
+			write_buffer[i] = transformacion_inversa(resultado);
+		}
+
+		monitor.write(write_buffer.data(), read);
+		//log.write((char*)read_buffer.data(), read);
+
+		size = scrollX->count();
+		if (available > max)
+			max = available;
+		if (read < available)
+			std::cout << "El buffer quedó chico\n";
+		// input_plot.set_data(scrollX->data(), scrollY->data(), size);
+	};
+
+	double left_limit = 0, right_limit = max_time_visible;
+	double* linked_xmin = &left_limit, * linked_xmax = &right_limit;
 
 	auto toggle_serial = [&] {
 		if (!serial_started) {
 			if (selected_port.empty())
 				return;
 
+			left_limit = 0, right_limit = max_time_visible;
 			init_buffers();
-			serial.open(selected_port.c_str(), selected_baud);
-			start_time = ImGui::GetTime();
+			monitor.start(selected_port.c_str(), selected_baud);
+			start_time = clock::now();
 			scrollX->clear();
 			scrollY->clear();
+			linked_xmin = linked_xmax = nullptr;
 		}
-		else
-			serial.close();
+		else {
+			monitor.stop();
+			std::cout << std::format("Max bytes read at once: {}\n", max);
+			linked_xmin = &left_limit;
+			linked_xmax = &right_limit;
+		}
 		serial_started = !serial_started;
+	};
+
+	ImPlotTransform scale = [](double v, void*) {
+		//v = v < 0.0 ? DBL_MIN : v;
+		return sqrt(v);
+	};
+
+	ImPlotTransform inverse_scale = [](double value, void*) {
+		return value * value;
 	};
 
 
@@ -494,30 +440,25 @@ int main(int, char**)
 
 			static float f = 0.0f;
 			static int counter = 0;
+			static double elapsed_time = 0;
+
 			if (serial_started && avanzar) {
-				float now = ImGui::GetTime();
-				elapsed_time = now - start_time;
+				elapsed_time = duration(clock::now() - start_time).count();
 				draw_size = size;
-				int count = scrollX->count();
-				std::copy(scrollX->data(), scrollX->data() + count, xs);
-				std::copy(scrollY->data(), scrollY->data() + count, ys);
 
-				left_limit = scrollX->front();
-				right_limit = left_limit + show_time;
+				//std::copy(scrollX->data(), scrollX->data() + size, xs);
+				//std::copy(scrollY->data(), scrollY->data() + size, ys);
 
-				std::transform(ys, ys + N, in.data(), [](double d) { return d; });
+				if (elapsed_time > max_time_visible) {
+					right_limit = scrollX->back();
+					left_limit = right_limit - max_time_visible;
+				}
+
+				std::transform(scrollY->data(), scrollY->data() + muestras, in.data(), [](double d) { return d; });
 				fftw_execute(p);
 				std::transform(out, out + out_N, fourier.data(), magnitude);
-
-				//if (count == 960) {
-				//	for (int i = 0; i < N; i++)
-				//		log << in[i] << ", ";
-				//	log << '\n';
-				//	for (int i = 0; i < out_N; i++)
-				//		log << fourier[i] << ", ";
-				//	log << '\n';
-				//}
 			}
+
 
 			ImGui::SetNextWindowPos({ 0, 0 });
 			ImGui::SetNextWindowSize({ width, height });
@@ -548,28 +489,58 @@ int main(int, char**)
 			if (Button(serial_started ? "Desconectar" : "Conectar", selected_port.empty()))
 				toggle_serial();
 
-			if (ImPlot::BeginPlot("Señal")) {
-				//ImPlot::SetupAxisLimits(ImAxis_Y1, -1, 1, ImGuiCond_FirstUseEver);
-				//ImPlot::SetupAxisLimits(ImAxis_X1, -2, 2, ImGuiCond_Always);
-				ImPlot::SetupAxisFormat(ImAxis_Y1, MetricFormatter, (void*)"V");
-				ImPlot::SetupAxisFormat(ImAxis_X1, MetricFormatter, (void*)"s");
-				//ImGui::BeginTooltip
-				ImPlot::SetupAxisLimits(ImAxis_Y1, -8, 8, ImGuiCond_FirstUseEver);
-				ImPlot::SetupAxisLimits(ImAxis_X1, left_limit, right_limit, serial_started && avanzar ? ImGuiCond_Always : ImGuiCond_None);
-				//ImPlot::PlotBars("My Bar Plot", bar_data, 11);
-				//ImPlot::PushStyleVar(legendshow, 0);
-				ImPlot::PlotLine("Entrada", xs, ys, draw_size, ImPlotItemFlags_NoLegend);
-				ImPlot::EndPlot();
+			ImGui::Text("Tiempo transcurrido: %.1fs", elapsed_time);
+			//static ImPlotRect rect(0.0025, 0.0045, 0, 0.5);
+			//static ImPlotDragToolFlags flags = ImPlotDragToolFlags_None;
+
+			if (ImPlot::BeginAlignedPlots("AlignedGroup")) {
+				if (ImPlot::BeginPlot("Señal")) {
+					ImPlot::SetupAxisLinks(ImAxis_X1, linked_xmin, linked_xmax);
+					//ImPlot::SetupAxisLimits(ImAxis_Y1, -1, 1, ImGuiCond_FirstUseEver);
+					//ImPlot::SetupAxisLimits(ImAxis_X1, -2, 2, ImGuiCond_Always);
+					ImPlot::SetupAxisFormat(ImAxis_Y1, MetricFormatter, (void*)"V");
+					ImPlot::SetupAxisFormat(ImAxis_X1, MetricFormatter, (void*)"s");
+					//ImGui::BeginTooltip
+					ImPlot::SetupAxisLimits(ImAxis_Y1, -7, 7, ImGuiCond_FirstUseEver);
+					ImPlot::SetupAxisLimits(ImAxis_X1, left_limit, right_limit, serial_started && avanzar ? ImGuiCond_Always : ImGuiCond_None);
+					//ImPlot::PlotBars("My Bar Plot", bar_data, 11);
+					//ImPlot::PushStyleVar(legendshow, 0);
+					//PlotStairs
+					//ImPlot::DragRect(0, &rect.X.Min, &rect.Y.Min, &rect.X.Max, &rect.Y.Max, ImVec4(1, 0, 1, 1), flags);
+					ImPlot::PlotLine("Entrada", scrollX->data(), scrollY->data(), draw_size, ImPlotItemFlags_NoLegend);
+					ImPlot::EndPlot();
+				}
+
+				//if (ImPlot::BeginPlot("##rect", ImVec2(-1, 0), ImPlotFlags_CanvasOnly)) {
+				//	ImPlot::SetupAxes(nullptr, nullptr, ImPlotAxisFlags_NoDecorations, ImPlotAxisFlags_NoDecorations);
+				//	ImPlot::SetupAxesLimits(rect.X.Min, rect.X.Max, rect.Y.Min, rect.Y.Max, ImGuiCond_Always);
+				//	ImPlot::PlotLine("Entrada", scrollX->data(), scrollY->data(), draw_size, ImPlotItemFlags_NoLegend);
+				//	ImPlot::EndPlot();
+				//}
+
+				if (ImPlot::BeginPlot("Filtro")) {
+					ImPlot::SetupAxisLinks(ImAxis_X1, linked_xmin, linked_xmax);
+					ImPlot::SetupAxisFormat(ImAxis_Y1, MetricFormatter, (void*)"V");
+					ImPlot::SetupAxisFormat(ImAxis_X1, MetricFormatter, (void*)"s");
+					ImPlot::SetupAxisLimits(ImAxis_Y1, -7, 7, ImGuiCond_FirstUseEver);
+					ImPlot::SetupAxisLimits(ImAxis_X1, left_limit, right_limit, serial_started && avanzar ? ImGuiCond_Always : ImGuiCond_None);
+
+					ImPlot::PlotLine("Entrada", out_scrollX->data(), out_scrollY->data(), draw_size, ImPlotItemFlags_NoLegend);
+					ImPlot::EndPlot();
+				}
+				ImPlot::EndAlignedPlots();
 			}
+
 
 			if (ImPlot::BeginPlot("Fourier")) {
 				ImPlot::SetupAxisFormat(ImAxis_Y1, MetricFormatter, (void*)"V");
 				ImPlot::SetupAxisFormat(ImAxis_X1, MetricFormatter, (void*)"Hz");
 				ImPlot::SetupAxis(ImAxis_X1, "Frecuencia", ImPlotAxisFlags_AutoFit);
 				ImPlot::SetupAxis(ImAxis_Y1, "Amplitud", ImPlotAxisFlags_AutoFit);
+				//ImPlot::SetupAxisScale(ImAxis_X1, ImPlotScale_Log10);
+				ImPlot::SetupAxisScale(ImAxis_Y1, scale, inverse_scale);
 				//ImPlot::PlotBars("My Bar Plot", bar_data, 11);
 				//ImPlot::PushStyleVar(legendshow, 0);
-
 				ImPlot::PlotStems("Entrada", fourier_x.data(), fourier.data(), out_N, 0, ImPlotItemFlags_NoLegend);
 				ImPlot::EndPlot();
 			}
@@ -588,13 +559,14 @@ int main(int, char**)
 			//ImPlot::ShowDemoWindow();
 		}
 
-		// Rendering
-		ImGui::Render();
 		int display_w, display_h;
 		glfwGetFramebufferSize(window, &display_w, &display_h);
 		glViewport(0, 0, display_w, display_h);
 		glClearColor(clear_color.x * clear_color.w, clear_color.y * clear_color.w, clear_color.z * clear_color.w, clear_color.w);
 		glClear(GL_COLOR_BUFFER_BIT);
+
+		// Rendering
+		ImGui::Render();
 		ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
 		glfwSwapBuffers(window);
@@ -603,9 +575,7 @@ int main(int, char**)
 	EMSCRIPTEN_MAINLOOP_END;
 #endif
 
-	run_receive = false;
-	fetch_thread.join();
-
+	monitor.stop();
 	destroy_buffers();
 
 	// Cleanup

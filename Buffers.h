@@ -1,5 +1,10 @@
 #pragma once
 
+#include <functional>
+#include <future>
+#include <format>
+#include <implot.h>
+
 template <typename T>
 class ScrollBuffer {
 public:
@@ -292,100 +297,103 @@ private:
 	std::mutex data_mutex;
 };
 
-class Monitor {
+template <typename T>
+class Plot {
 public:
-	Monitor(size_t input_capacity, size_t output_capacity, size_t buffer_size) :
-		input_queue(input_capacity), output_queue(output_capacity), buffer_size(buffer_size)
-	{
-		input_buffer = new uint8_t[buffer_size * 2];
-		output_buffer = &input_buffer[buffer_size];
+	//Plot() {
+
+	//}
+
+	//Plot(T* xbuf, T* ybuf, size_t* size) {
+	//	if (xbuf == nullptr || ybuf == nullptr || size == nullptr)
+	//		throw std::exception("Ningún parámetro puede ser nulo");
+
+	//	buffer_xs = xbuf;
+	//	buffer_ys = ybuf;
+	//	draw_size_ptr = size;
+	//	own_buffers = false;
+	//}
+
+	Plot(size_t buffer_size) {
+		buffer_xs = new T[buffer_size * 2];
+		buffer_ys = &buffer_xs[buffer_size];
 	}
 
-	~Monitor() {
-		stop();
-		delete[] input_buffer;
-		//delete[] output_buffer;
+	~Plot() {
+		//if (own_buffers)
+		delete[] buffer_xs;
 	}
 
-	void start(const char *port, uint32_t baud) {
-		serial.open(port, baud);
-		do_work = true;
-		input_thread = std::thread(&Monitor::read_from_serial, this);
-		output_thread = std::thread(&Monitor::write_from_serial, this);
+	void push(T x, T y) {
+		//if (!own_buffers)
+		//	throw std::exception("No puedes modificar buffers prestados");
+
+		buffer_xs[draw_size] = x;
+		buffer_ys[draw_size] = y;
+		draw_size++;
 	}
 
-	void stop() {
-		serial.close();
-		do_work = false;
-		input_thread.join();
-		output_thread.join();
+	//template <typename T>
+	//void copy(const T* buffer_)
+
+	void draw() {
+		if (ImPlot::BeginPlot(m_title)) {
+			ImPlot::SetupAxisFormat(ImAxis_Y1, y_formatter, x_formatter_data);
+			ImPlot::SetupAxisFormat(ImAxis_X1, x_formatter, y_formatter_data);
+
+			ImPlot::SetupAxisLimits(ImAxis_Y1, up_limit, down_limit, vlimit_cond);
+			ImPlot::SetupAxisLimits(ImAxis_X1, left_limit, right_limit, hlimit_cond);
+
+			ImPlot::PlotLine("Entrada", buffer_xs, buffer_ys, draw_size, ImPlotItemFlags_NoLegend);
+			ImPlot::EndPlot();
+		}
 	}
 
-	size_t available() {
-		return input_queue.size();
+	void set_data(const T* xbuf, const T* ybuf, size_t size) {
+		if (xbuf == nullptr || ybuf == nullptr)
+			throw std::exception("Ningún parámetro puede ser nulo");
+
+		//buffer_xs = const_cast<T*>(xbuf);
+		//buffer_ys = const_cast<T*>(ybuf);
+		//draw_size_ptr = size;
+		//own_buffers = false;
+		std::copy(xbuf, xbuf + size, buffer_xs);
+		std::copy(ybuf, ybuf + size, buffer_ys);
+		draw_size = size;
 	}
 
-	size_t pending() {
-		return output_queue.size();
+	void set_title(const char* title) {
+		m_title = title;
 	}
 
-	template <typename T>
-	T get() {
-		T value;
-		if (input_queue.size() >= sizeof(T))
-			input_queue.read(&value, sizeof(T));
-		return value;
+	void set_vlimits(int up, int down, ImPlotCond cond = ImGuiCond_Once) {
+		up_limit = up;
+		down_limit = down;
+		vlimit_cond = cond;
 	}
 
-	template <typename T>
-	bool put(const T value) {
-		if (output_queue.available() < sizeof(T))
-			return false;
-
-		output_queue.write(&value, sizeof(T));
-		return true;
+	void set_hlimits(int left, int right, ImPlotCond cond = ImGuiCond_Once) {
+		left_limit = left;
+		right_limit = right;
+		hlimit_cond = cond;
 	}
 
-	size_t read(uint8_t* buffer, int count) {
-		//if (input_queue.size() == 0)
-		//	return 0;
-
-		return input_queue.read(buffer, count);
+	void set_format(ImPlotFormatter x, void* x_data, ImPlotFormatter y, void* y_data) {
+		x_formatter = x;
+		y_formatter = y;
+		x_formatter_data = x_data;
+		y_formatter_data = y_data;
 	}
 
-	size_t write(const uint8_t* buffer, int count) {
-		if (output_queue.available() < count)
-			return 0;
-
-		return output_queue.write(buffer, count);
-	}
+	ImPlotFormatter x_formatter = nullptr, y_formatter = nullptr;
+	void* x_formatter_data = nullptr, * y_formatter_data = nullptr;
+	const char* m_title = nullptr;
+	int up_limit = 5, down_limit = -5, left_limit = -5, right_limit = 5;
+	ImPlotCond vlimit_cond = ImGuiCond_Once, hlimit_cond = ImGuiCond_Once;
 
 private:
-	void read_from_serial() {
-		//std::cout << "Reading\n";
-		while (do_work) {
-			int bytes_read = serial.read(input_buffer, buffer_size);
-			if (bytes_read) {
-				input_queue.write(input_buffer, bytes_read);
-			}
-		}
-	}
-
-	void write_from_serial() {
-		while (do_work) {
-			int available = output_queue.size();
-			if (available > 0) {
-				int bytes_read = output_queue.read(output_buffer, buffer_size);
-				serial.write(output_buffer, bytes_read);
-			}
-		}
-	}
-
-	bool do_work = false;
-	Serial serial;
-	std::thread input_thread, output_thread;
-
-	int buffer_size;
-	uint8_t* input_buffer, *output_buffer;
-	Buffer<uint8_t> input_queue, output_queue;
+	size_t draw_size = 0;
+	T* buffer_xs = nullptr, * buffer_ys = nullptr;
+	//size_t* draw_size_ptr = &draw_size;
+	//bool own_buffers = true;
 };

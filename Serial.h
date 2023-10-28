@@ -1,9 +1,13 @@
+#pragma once
+
 #include <Windows.h>
 #include <iostream>
 #include <string>
 #include <vector>
 
 void printErrorMessage(DWORD error = -1);
+
+std::vector<std::string> EnumerateComPorts();
 
 class Serial {
 	HANDLE file = 0;
