@@ -19,7 +19,7 @@ public:
 
 	template <typename T>
 	T get() {
-		T value;
+		T value = 0;
 		if (input_queue.size() >= sizeof(T))
 			input_queue.read(&value, sizeof(T));
 		return value;

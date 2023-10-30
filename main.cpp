@@ -7,37 +7,26 @@
 // - Documentation        https://dearimgui.com/docs (same as your local docs/ folder).
 // - Introduction, links and more at the top of imgui.cpp
 
-#include <fftw3.h>
 
-#include "imgui.h"
-#include "imgui_impl_glfw.h"
-#include "imgui_impl_opengl3.h"
-#include <stdio.h>
-#define GL_SILENCE_DEPRECATION
-#if defined(IMGUI_IMPL_OPENGL_ES2)
-#include <GLES2/gl2.h>
-#endif
+#include <glad/glad.h>
 #include <GLFW/glfw3.h> // Will drag system OpenGL headers
 
-// [Win32] Our example includes a copy of glfw3.lib pre-compiled with VS2010 to maximize ease of testing and compatibility with old VS compilers.
-// To link with VS2010-era libraries, VS2015+ requires linking with legacy_stdio_definitions.lib, which we do using this pragma.
-// Your own project should not be affected, as you are likely to link with a newer binary of GLFW that is adequate for your version of Visual Studio.
-#if defined(_MSC_VER) && (_MSC_VER >= 1900) && !defined(IMGUI_DISABLE_WIN32_FUNCTIONS)
-#pragma comment(lib, "legacy_stdio_definitions")
-#endif
-
-// This example can also compile and run with Emscripten! See 'Makefile.emscripten' for details.
-
-#include <implot.h>
 #include <thread>
 #include <queue>
 #include <fstream>
 #include <chrono>
+
+#include "imgui.h"
+#include "imgui_impl_glfw.h"
+#include "imgui_impl_opengl3.h"
+
+#include <fftw3.h>
+#include <implot.h>
 #include <imgui_internal.h>
+
 #include "Serial.h"
 #include "Buffers.h"
 #include "Monitor.h"
-//#include <math.h>
 
 double magnitude(fftw_complex complex) {
 	return sqrt(complex[0] * complex[0] + complex[1] * complex[1]);
@@ -53,28 +42,33 @@ float width = 1280, height = 720;
 void window_resize(GLFWwindow* window, int w, int h) {
 	width = w;
 	height = h;
-	//ImGui::SetWindowSize("Hello, world!", { (float)width, (float)height });
 }
 
 int MetricFormatter(double value, char* buff, int size, void* data) {
 	const char* unit = (const char*)data;
-	static double v[] = { 1000000000,1000000,1000,1,0.001,0.000001,0.000000001 };
-	static const char* p[] = { "G","M","k","","m","u","n" };
+	static double v[] = { 1e12, 1e9, 1e6, 1e3, 1, 1e-3, 1e-6, 1e-9, 1e-12};
+	static const char* p[] = { "T", "G", "M", "k", "", "m", "u", "n", "p" };
+
 	if (value == 0) {
 		return snprintf(buff, size, "0 %s", unit);
 	}
+
+	//double exponent = log10(abs(value));
+	//if (exponent < 12 && exponent > -12) {
+	//	int i = (12 - exponent) / 3;
+	//	return snprintf(buff, size, "%g %s%s", value / v[i], p[i], unit);
 	for (int i = 0; i < 7; ++i) {
 		if (fabs(value) >= v[i]) {
 			return snprintf(buff, size, "%g %s%s", value / v[i], p[i], unit);
 		}
 	}
-	return snprintf(buff, size, "%g %s%s", value / v[6], p[6], unit);
+	return snprintf(buff, size, "%g %s%s", value / v[sizeof(v) - 1], p[sizeof(v) - 1], unit);
 }
 
 using namespace std::chrono_literals;
 using namespace std::string_literals;
 
-bool Button(const char *label, bool disabled = false) {
+bool Button(const char* label, bool disabled = false) {
 	if (disabled) {
 		ImGui::PushItemFlag(ImGuiItemFlags_Disabled, true);
 		ImGui::PushStyleVar(ImGuiStyleVar_Alpha, ImGui::GetStyle().Alpha * 0.5f);
@@ -87,65 +81,67 @@ bool Button(const char *label, bool disabled = false) {
 	return result;
 }
 
+class Plott {
+	std::vector<double> xs, ys;
+	//std::vector<T> shownData;
+	std::string title;
+	size_t size;
 
-void reception_test() {
-	using clock = std::chrono::high_resolution_clock;
-	using time_point = clock::time_point;
-	using duration = std::chrono::duration<double>;
-	time_point start = clock::now(), now;
-	double dur = 0;
-	int read = 0;
+	double min_hlim, max_hlim, min_vlim, max_vlim;
+	ImPlotCond cond_hlim = ImPlotCond_Once, cond_vlim = ImPlotCond_Once;
 
-	Serial ser;
-	ser.open("COM5", 38400);
-	uint8_t buff[1024];
-	while (dur <= 1) {
-		now = clock::now();
-		dur = duration(now - start).count();
-		read += ser.read(buff, 1024);
+	double* min_hlink = nullptr, * max_hlink = nullptr,
+		* min_vlink = nullptr, * max_vlink = nullptr;
+
+public:
+	Plott(const char* title, size_t max) : title(title), xs(max), ys(max) {
 	}
-	std::cout << std::format("{} bytes read in {} seconds.\n", read, dur);
-}
 
-void monitor_test() {
-	using clock = std::chrono::high_resolution_clock;
-	using time_point = clock::time_point;
-	using duration = std::chrono::duration<double>;
-
-	std::vector<uint8_t> buff(4 * 1024);
-	Monitor monitor(16 * 1024, 2 * 1024, 1024);
-	int read = 0;
-
-	monitor.start("COM5", 38400);
-
-	std::this_thread::sleep_for(1s);
-
-	int available = monitor.available();
-
-	time_point start = clock::now(), now;
-	read = monitor.read(buff.data(), available);
-	now = clock::now();
-
-	std::cout << std::format("{} bytes available\n", available);
-	std::cout << std::format("{} bytes read in {} seconds.\n", read, duration(now - start).count());
-	std::cout << std::format("{} bytes still available\n", monitor.available());
-}
-
-void interval() {
-	using clock = std::chrono::high_resolution_clock;
-	using time_point = clock::time_point;
-	using duration = std::chrono::duration<double>;
-
-	time_point start = clock::now();
-	for (size_t i = 0; i < 10; i++)
-	{
-		time_point next = start + 1s;
-		std::this_thread::sleep_until(next);
-		std::cout << "Now: " << duration(clock::now() - start).count() << '\n';
-		start = next;
+	void SetHLimits(double min_lim, double max_lim, ImPlotCond cond) {
+		min_hlim = min_lim;
+		max_hlim = max_lim;
+		cond_hlim = cond;
 	}
-}
 
+	void SetVLimits(double min_lim, double max_lim, ImPlotCond cond) {
+		min_vlim = min_lim;
+		max_vlim = max_lim;
+		cond_vlim = cond;
+	}
+
+	void SetHLinks(double* min_link, double* max_link) {
+		min_hlink = min_link;
+		max_hlink = max_link;
+	}
+
+	void SetVLinks(double* min_link, double* max_link) {
+		min_vlink = min_link;
+		max_vlink = max_link;
+	}
+
+	void SetData(const double* input_xs, const double* input_ys, size_t size) {
+		std::copy(input_xs, input_xs + size, xs.data());
+		std::copy(input_ys, input_ys + size, ys.data());
+		this->size = size;
+	}
+
+	void Draw() {
+		if (!ImPlot::BeginPlot(title.c_str(), { -1,300 }))
+			return;
+
+		ImPlot::SetupAxisLinks(ImAxis_X1, min_hlink, max_hlink);
+		ImPlot::SetupAxisLinks(ImAxis_Y1, min_vlink, max_vlink);
+
+		ImPlot::SetupAxisFormat(ImAxis_Y1, MetricFormatter, (void*)"V");
+		ImPlot::SetupAxisFormat(ImAxis_X1, MetricFormatter, (void*)"s");
+
+		ImPlot::SetupAxisLimits(ImAxis_Y1, min_vlim, max_vlim, cond_vlim);
+		ImPlot::SetupAxisLimits(ImAxis_X1, min_hlim, max_hlim, cond_hlim);
+
+		ImPlot::PlotLine("", xs.data(), ys.data(), size, ImPlotItemFlags_NoLegend);
+		ImPlot::EndPlot();
+	}
+};
 
 // Main code
 int main(int, char**)
@@ -154,9 +150,9 @@ int main(int, char**)
 	using time_point = clock::time_point;
 	using duration = std::chrono::duration<double>;
 
-	const int muestras = 3840;
+	const int muestras = 11520;
 
-	float frecuencia_muestreo = 3840;
+	float frecuencia_muestreo = 11520;
 
 	fftw_complex* out; /* Output */
 	fftw_plan p; /* Plan */
@@ -222,6 +218,11 @@ int main(int, char**)
 	glfwMakeContextCurrent(window);
 	glfwSwapInterval(1); // Enable vsync
 
+	if (!gladLoadGL()) {
+		glfwTerminate();
+		return -1;
+	}
+
 	// Setup Dear ImGui context
 	IMGUI_CHECKVERSION();
 	ImGui::CreateContext();
@@ -238,25 +239,7 @@ int main(int, char**)
 	ImGui_ImplGlfw_InitForOpenGL(window, true);
 	ImGui_ImplOpenGL3_Init(glsl_version);
 
-	// Load Fonts
-	// - If no fonts are loaded, dear imgui will use the default font. You can also load multiple fonts and use ImGui::PushFont()/PopFont() to select them.
-	// - AddFontFromFileTTF() will return the ImFont* so you can store it if you need to select the font among multiple.
-	// - If the file cannot be loaded, the function will return a nullptr. Please handle those errors in your application (e.g. use an assertion, or display an error and quit).
-	// - The fonts will be rasterized at a given size (w/ oversampling) and stored into a texture when calling ImFontAtlas::Build()/GetTexDataAsXXXX(), which ImGui_ImplXXXX_NewFrame below will call.
-	// - Use '#define IMGUI_ENABLE_FREETYPE' in your imconfig file to use Freetype for higher quality font rendering.
-	// - Read 'docs/FONTS.md' for more instructions and details.
-	// - Remember that in C/C++ if you want to include a backslash \ in a string literal you need to write a double backslash \\ !
-	// - Our Emscripten build process allows embedding fonts to be accessible at runtime from the "fonts/" folder. See Makefile.emscripten for details.
-	//io.Fonts->AddFontDefault();
-	//io.Fonts->AddFontFromFileTTF("c:\\Windows\\Fonts\\segoeui.ttf", 18.0f);
-	//io.Fonts->AddFontFromFileTTF("../../misc/fonts/DroidSans.ttf", 16.0f);
-	//io.Fonts->AddFontFromFileTTF("../../misc/fonts/Roboto-Medium.ttf", 16.0f);
-	//io.Fonts->AddFontFromFileTTF("../../misc/fonts/Cousine-Regular.ttf", 15.0f);
-	//ImFont* font = io.Fonts->AddFontFromFileTTF("c:\\Windows\\Fonts\\ArialUni.ttf", 18.0f, nullptr, io.Fonts->GetGlyphRangesJapanese());
-	//IM_ASSERT(font != nullptr);
-
 	// Our state
-	bool show_another_window = false;
 	ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
 
 	const float e = 2.71828182846f;
@@ -281,12 +264,14 @@ int main(int, char**)
 
 	std::vector<uint8_t> read_buffer, write_buffer;
 
+	//Plott* input;
 	ScrollBuffer<double>* scrollX = nullptr, * scrollY = nullptr;
 	ScrollBuffer<double>* out_scrollX = nullptr, * out_scrollY = nullptr;
 	float* xs = 0, * ys = 0;
 	float next_time = 0;
 
 	const auto destroy_buffers = [&] {
+		//delete input;
 		delete scrollX;
 		delete scrollY;
 		delete out_scrollX;
@@ -301,11 +286,12 @@ int main(int, char**)
 		size = 0;
 		view_size = max_time_visible * speed;
 		next_time = 0;
-		std::cout << std::format("Speed: {}\n", speed);
+		//std::cout << std::format("Speed: {}\n", speed);
 
 		destroy_buffers();
 		read_buffer.resize(1024);
 		write_buffer.resize(1024);
+		//input = new Plott("Entrada", view_size);
 		scrollX = new ScrollBuffer<double>(max_size, view_size);
 		scrollY = new ScrollBuffer<double>(max_size, view_size);
 		out_scrollX = new ScrollBuffer<double>(max_size, view_size);
@@ -317,11 +303,10 @@ int main(int, char**)
 	init_buffers();
 
 	Monitor monitor(16 * 1024, 4 * 1024, 1024);
-	bool run_receive = true, run_transmission = true, serial_started = false;
+	bool serial_started = false;
 	bool show = true;
 
 	std::string selected_port;
-	std::string selected_baud_str = std::to_string(selected_baud);
 
 	time_point start_time = clock::now();
 
@@ -331,7 +316,9 @@ int main(int, char**)
 
 	//std::ofstream log("C:/Users/usuario/Desktop/log.txt");
 
-	std::function<double(double)> filtro;
+	std::function<double(double)> filtro = [](double d) {
+		return d / 2;
+	};
 	const std::function<double(uint8_t)> transformacion = [&](uint8_t v) {
 		return (v - minimo) / (double)(maximo - minimo) * 12 - 6;
 	};
@@ -350,12 +337,12 @@ int main(int, char**)
 
 		for (size_t i = 0; i < read; i++)
 		{
-			double resultado = transformacion(read_buffer[i]);
-			if (filtro)
-				resultado = filtro(resultado);
+			double transformado = transformacion(read_buffer[i]);
 
-			scrollY->push(resultado);
+			scrollY->push(transformado);
 			scrollX->push(next_time);
+
+			double resultado = filtro ? transformado : filtro(transformado);
 
 			// Filtro
 			out_scrollY->push(resultado);
@@ -369,15 +356,20 @@ int main(int, char**)
 		//log.write((char*)read_buffer.data(), read);
 
 		size = scrollX->count();
-		if (available > max)
-			max = available;
-		if (read < available)
-			std::cout << "El buffer quedó chico\n";
-		// input_plot.set_data(scrollX->data(), scrollY->data(), size);
+		//if (available > max)
+		//	max = available;
+		//if (read < available)
+		//	std::cout << "El buffer quedó chico\n";
 	};
 
 	double left_limit = 0, right_limit = max_time_visible;
+	double ymin = -7, ymax = 7;
 	double* linked_xmin = &left_limit, * linked_xmax = &right_limit;
+	double* linked_ymin = &ymin, * linked_ymax = &ymax;
+
+	//input->SetHLinks(linked_xmin, linked_xmax);
+	//input->SetVLinks(linked_ymin, linked_ymax);
+	//input->SetVLimits(-7, 7, ImPlotCond_Once);
 
 	auto toggle_serial = [&] {
 		if (!serial_started) {
@@ -394,7 +386,7 @@ int main(int, char**)
 		}
 		else {
 			monitor.stop();
-			std::cout << std::format("Max bytes read at once: {}\n", max);
+			//std::cout << std::format("Máxima transferencia de bytes: {}\n", max);
 			linked_xmin = &left_limit;
 			linked_xmax = &right_limit;
 		}
@@ -402,7 +394,6 @@ int main(int, char**)
 	};
 
 	ImPlotTransform scale = [](double v, void*) {
-		//v = v < 0.0 ? DBL_MIN : v;
 		return sqrt(v);
 	};
 
@@ -410,16 +401,8 @@ int main(int, char**)
 		return value * value;
 	};
 
-
 	// Main loop
-#ifdef __EMSCRIPTEN__
-	// For an Emscripten build we are disabling file-system access, so let's not attempt to do a fopen() of the imgui.ini file.
-	// You may manually call LoadIniSettingsFromMemory() to load settings from your own storage.
-	io.IniFilename = nullptr;
-	EMSCRIPTEN_MAINLOOP_BEGIN
-#else
 	while (!glfwWindowShouldClose(window))
-#endif
 	{
 		// Poll and handle events (inputs, window resize, etc.)
 		// You can read the io.WantCaptureMouse, io.WantCaptureKeyboard flags to tell if dear imgui wants to use your inputs.
@@ -434,80 +417,68 @@ int main(int, char**)
 		ImGui::NewFrame();
 
 
-		// 2. Show a simple window that we create ourselves. We use a Begin/End pair to create a named window.
 		{
 			auto puertos = EnumerateComPorts();
 
-			static float f = 0.0f;
-			static int counter = 0;
+			static int stride = 4;
 			static double elapsed_time = 0;
+			int byte_stride = sizeof(double) * stride;
 
-			if (serial_started && avanzar) {
+			draw_size = size / stride;
+			if (serial_started) {
 				elapsed_time = duration(clock::now() - start_time).count();
-				draw_size = size;
-
-				//std::copy(scrollX->data(), scrollX->data() + size, xs);
-				//std::copy(scrollY->data(), scrollY->data() + size, ys);
 
 				if (elapsed_time > max_time_visible) {
 					right_limit = scrollX->back();
 					left_limit = right_limit - max_time_visible;
 				}
-
-				std::transform(scrollY->data(), scrollY->data() + muestras, in.data(), [](double d) { return d; });
-				fftw_execute(p);
-				std::transform(out, out + out_N, fourier.data(), magnitude);
 			}
-
 
 			ImGui::SetNextWindowPos({ 0, 0 });
 			ImGui::SetNextWindowSize({ width, height });
-			ImGui::Begin("Hello, world!", 0, ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoTitleBar);                          // Create a window called "Hello, world!" and append into it.
+			ImGui::Begin("Ventana principal", 0, ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_MenuBar);
 
-			if (puertos.empty()) {
-				ImGui::Text("Conecta un dispositivo");
-			}
-			else if (ImGui::BeginCombo("Puerto", selected_port.empty() ? "Seleccionar puerto" : selected_port.c_str())) {
-				for (const auto& puerto : puertos)
-					if (ImGui::Selectable(puerto.c_str()))
-						selected_port = puerto.c_str();
-				ImGui::EndCombo();
-			}
-
-			const int bauds[] = { 9600, 14400, 19200, 38400, 100000, 115200, 1000000, 2000000 };
-			if (ImGui::BeginCombo("Velocidad", selected_baud_str.c_str())) {
-				for (const auto& baud : bauds) {
-					auto str = std::to_string(baud);
-					if (ImGui::Selectable(str.c_str())) {
-						selected_baud = baud;
-						selected_baud_str = std::move(str);
+			if (ImGui::BeginMenuBar())
+			{
+				if (ImGui::BeginMenu("Dispositivo")) {
+					if (puertos.empty()) {
+						ImGui::Text("No hay ningún dispositivo conectado");
 					}
+					else {
+						for (const auto& puerto : puertos)
+							if (ImGui::MenuItem(puerto.c_str()))
+								selected_port = puerto;
+					}
+					ImGui::EndMenu();
 				}
-				ImGui::EndCombo();
-			}
 
-			if (Button(serial_started ? "Desconectar" : "Conectar", selected_port.empty()))
-				toggle_serial();
+				if (Button(serial_started ? "Desconectar" : "Conectar", selected_port.empty())) {
+					toggle_serial();
+				}
+				if (selected_port.empty()) {
+					ImGui::SetItemTooltip("Selecciona un dispositivo primero");
+				}
+				ImGui::EndMenuBar();
+			}
 
 			ImGui::Text("Tiempo transcurrido: %.1fs", elapsed_time);
-			//static ImPlotRect rect(0.0025, 0.0045, 0, 0.5);
-			//static ImPlotDragToolFlags flags = ImPlotDragToolFlags_None;
+			ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / io.Framerate, io.Framerate);
+			ImGui::SliderInt("Stride", &stride, 1, 32);
 
-			if (ImPlot::BeginAlignedPlots("AlignedGroup")) {
-				if (ImPlot::BeginPlot("Señal")) {
+			if (ImPlot::BeginAlignedPlots("Grupo")) {
+				if (ImPlot::BeginPlot("Entrada", { -1,0 }, ImPlotFlags_NoLegend)) {
 					ImPlot::SetupAxisLinks(ImAxis_X1, linked_xmin, linked_xmax);
-					//ImPlot::SetupAxisLimits(ImAxis_Y1, -1, 1, ImGuiCond_FirstUseEver);
-					//ImPlot::SetupAxisLimits(ImAxis_X1, -2, 2, ImGuiCond_Always);
+					ImPlot::SetupAxisLinks(ImAxis_Y1, linked_ymin, linked_ymax);
+
 					ImPlot::SetupAxisFormat(ImAxis_Y1, MetricFormatter, (void*)"V");
 					ImPlot::SetupAxisFormat(ImAxis_X1, MetricFormatter, (void*)"s");
-					//ImGui::BeginTooltip
+
 					ImPlot::SetupAxisLimits(ImAxis_Y1, -7, 7, ImGuiCond_FirstUseEver);
-					ImPlot::SetupAxisLimits(ImAxis_X1, left_limit, right_limit, serial_started && avanzar ? ImGuiCond_Always : ImGuiCond_None);
-					//ImPlot::PlotBars("My Bar Plot", bar_data, 11);
-					//ImPlot::PushStyleVar(legendshow, 0);
+					ImPlot::SetupAxisLimits(ImAxis_X1, left_limit, right_limit, serial_started ? ImGuiCond_Always : ImGuiCond_None);
+
 					//PlotStairs
 					//ImPlot::DragRect(0, &rect.X.Min, &rect.Y.Min, &rect.X.Max, &rect.Y.Max, ImVec4(1, 0, 1, 1), flags);
-					ImPlot::PlotLine("Entrada", scrollX->data(), scrollY->data(), draw_size, ImPlotItemFlags_NoLegend);
+					ImPlot::PlotLine("", scrollX->data(), scrollY->data(), draw_size, 0, 0, byte_stride);
 					ImPlot::EndPlot();
 				}
 
@@ -518,50 +489,50 @@ int main(int, char**)
 				//	ImPlot::EndPlot();
 				//}
 
-				if (ImPlot::BeginPlot("Filtro")) {
+				if (ImPlot::BeginPlot("Salida", { -1,0 }, ImPlotFlags_NoLegend)) {
 					ImPlot::SetupAxisLinks(ImAxis_X1, linked_xmin, linked_xmax);
+					ImPlot::SetupAxisLinks(ImAxis_Y1, linked_ymin, linked_ymax);
+
 					ImPlot::SetupAxisFormat(ImAxis_Y1, MetricFormatter, (void*)"V");
 					ImPlot::SetupAxisFormat(ImAxis_X1, MetricFormatter, (void*)"s");
 					ImPlot::SetupAxisLimits(ImAxis_Y1, -7, 7, ImGuiCond_FirstUseEver);
-					ImPlot::SetupAxisLimits(ImAxis_X1, left_limit, right_limit, serial_started && avanzar ? ImGuiCond_Always : ImGuiCond_None);
+					ImPlot::SetupAxisLimits(ImAxis_X1, left_limit, right_limit, serial_started ? ImGuiCond_Always : ImGuiCond_None);
 
-					ImPlot::PlotLine("Entrada", out_scrollX->data(), out_scrollY->data(), draw_size, ImPlotItemFlags_NoLegend);
+					ImPlot::PlotLine("", out_scrollX->data(), out_scrollY->data(), draw_size, 0, 0, byte_stride);
 					ImPlot::EndPlot();
 				}
 				ImPlot::EndAlignedPlots();
 			}
 
+			if (ImGui::CollapsingHeader("Análisis")) {
+				if (ImPlot::BeginPlot("Espectro", { -1, 0 }, ImPlotFlags_NoLegend)) {
+					std::async([&] {
+						std::transform(scrollY->data(), scrollY->data() + muestras, in.data(), [](double d) { return d; });
+						fftw_execute(p);
+						std::transform(out, out + out_N, fourier.data(), magnitude);
+					});
 
-			if (ImPlot::BeginPlot("Fourier")) {
-				ImPlot::SetupAxisFormat(ImAxis_Y1, MetricFormatter, (void*)"V");
-				ImPlot::SetupAxisFormat(ImAxis_X1, MetricFormatter, (void*)"Hz");
-				ImPlot::SetupAxis(ImAxis_X1, "Frecuencia", ImPlotAxisFlags_AutoFit);
-				ImPlot::SetupAxis(ImAxis_Y1, "Amplitud", ImPlotAxisFlags_AutoFit);
-				//ImPlot::SetupAxisScale(ImAxis_X1, ImPlotScale_Log10);
-				ImPlot::SetupAxisScale(ImAxis_Y1, scale, inverse_scale);
-				//ImPlot::PlotBars("My Bar Plot", bar_data, 11);
-				//ImPlot::PushStyleVar(legendshow, 0);
-				ImPlot::PlotStems("Entrada", fourier_x.data(), fourier.data(), out_N, 0, ImPlotItemFlags_NoLegend);
-				ImPlot::EndPlot();
+					ImPlot::SetupAxisFormat(ImAxis_Y1, MetricFormatter, (void*)"V");
+					ImPlot::SetupAxisFormat(ImAxis_X1, MetricFormatter, (void*)"Hz");
+					ImPlot::SetupAxis(ImAxis_X1, nullptr, ImPlotAxisFlags_AutoFit);
+					ImPlot::SetupAxis(ImAxis_Y1, nullptr, ImPlotAxisFlags_AutoFit);
+
+					ImPlot::SetupAxisScale(ImAxis_X1, ImPlotScale_Log10);
+					ImPlot::SetupAxisScale(ImAxis_Y1, scale, inverse_scale);
+
+					ImPlot::PlotStems("", fourier_x.data(), fourier.data(), out_N);
+					ImPlot::EndPlot();
+				}
 			}
-
-			ImGui::SliderFloat("Time scale", &show_time, max_time_scale, min_time_scale);
-			if (ImGui::Button(avanzar ? "Parar" : "Reanudar"))
-				avanzar = !avanzar;
 
 			ImGui::SliderInt("Máximo", &maximo, 0, 256);
 			ImGui::SliderInt("Mínimo", &minimo, 0, 256);
 
 			ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / io.Framerate, io.Framerate);
 			ImGui::End();
-
-			//ImGui::ShowDemoWindow();
-			//ImPlot::ShowDemoWindow();
 		}
 
-		int display_w, display_h;
-		glfwGetFramebufferSize(window, &display_w, &display_h);
-		glViewport(0, 0, display_w, display_h);
+		glViewport(0, 0, width, height);
 		glClearColor(clear_color.x * clear_color.w, clear_color.y * clear_color.w, clear_color.z * clear_color.w, clear_color.w);
 		glClear(GL_COLOR_BUFFER_BIT);
 
