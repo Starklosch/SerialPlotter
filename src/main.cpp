@@ -16,21 +16,17 @@
 #include <fstream>
 #include <chrono>
 
-#include "imgui.h"
-#include "imgui_impl_glfw.h"
-#include "imgui_impl_opengl3.h"
+#include <imgui.h>
+#include <imgui_impl_glfw.h>
+#include <imgui_impl_opengl3.h>
 
-#include <fftw3.h>
 #include <implot.h>
 #include <imgui_internal.h>
 
 #include "Serial.h"
 #include "Buffers.h"
 #include "Monitor.h"
-
-double magnitude(fftw_complex complex) {
-	return sqrt(complex[0] * complex[0] + complex[1] * complex[1]);
-}
+#include "FFT.h"
 
 static void glfw_error_callback(int error, const char* description)
 {
@@ -62,7 +58,7 @@ int MetricFormatter(double value, char* buff, int size, void* data) {
 			return snprintf(buff, size, "%g %s%s", value / v[i], p[i], unit);
 		}
 	}
-	return snprintf(buff, size, "%g %s%s", value / v[sizeof(v) - 1], p[sizeof(v) - 1], unit);
+	return snprintf(buff, size, "%g %s%s", value / v[std::size(v) - 1], p[std::size(p) - 1], unit);
 }
 
 using namespace std::chrono_literals;
@@ -143,44 +139,39 @@ public:
 	}
 };
 
-// Main code
-int main(int, char**)
-{
+void write_test() {
 	using clock = std::chrono::high_resolution_clock;
 	using time_point = clock::time_point;
 	using duration = std::chrono::duration<double>;
 
-	const int muestras = 11520;
+	double f = 4, pi = 3.141592653589793;
 
-	float frecuencia_muestreo = 11520;
+	Monitor monitor(16 * 1024, 4 * 1024, 1024);
+	monitor.start("COM5", 38400);
 
-	fftw_complex* out; /* Output */
-	fftw_plan p; /* Plan */
+	time_point start = clock::now(), end = start + 1s;
 
-	/*
-	 * Size of output is (N / 2 + 1) because the other remaining items are
-	 * redundant, in the sense that they are complex conjugate of already
-	 * computed ones.
-	 *
-	 * CASE SIZE 6 (even):
-	 * [real 0][complex 1][complex 2][real 3][conjugate of 2][conjugate of 1]
-	 *
-	 * CASE SIZE 5 (odd):
-	 * [real 0][complex 1][complex 2][conjugate of 2][conjugate of 1]
-	 *
-	 * In both cases the items following the first N/2+1 are redundant.
-	 */
-	const int out_N = muestras / 2 + 1;
-	out = (fftw_complex*)fftw_malloc(sizeof(fftw_complex) * out_N);
+	while (clock::now() < end) {
+		double t = duration(clock::now() - start).count();
+		double v = 255/2.f * (sin(2 * pi * f * t) + 1);
+		monitor.put((uint8_t)v);
+	}
+}
 
-	std::vector<double> in(muestras);
-	std::vector<double> in_x(muestras);
-	std::vector<double> fourier(out_N);
-	std::vector<double> fourier_x(out_N);
-	p = fftw_plan_dft_r2c_1d(muestras, in.data(), out, FFTW_ESTIMATE);
+// Main code
+int main(int, char**)
+{
+	//write_test();
+	//return 0;
 
-	for (size_t i = 0; i < out_N; i++)
-		fourier_x[i] = i * frecuencia_muestreo / muestras;
+	using clock = std::chrono::high_resolution_clock;
+	using time_point = clock::time_point;
+	using duration = std::chrono::duration<double>;
+
+	const int muestras = 3840;
+	float frecuencia_muestreo = 3840;
+
+	FFT fft(muestras);
 
 	glfwSetErrorCallback(glfw_error_callback);
 	if (!glfwInit())
@@ -232,8 +223,8 @@ int main(int, char**)
 	io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;      // Enable Gamepad Controls
 
 	// Setup Dear ImGui style
-	ImGui::StyleColorsDark();
-	//ImGui::StyleColorsLight();
+	//ImGui::StyleColorsDark();
+	ImGui::StyleColorsLight();
 
 	// Setup Platform/Renderer backends
 	ImGui_ImplGlfw_InitForOpenGL(window, true);
@@ -416,7 +407,6 @@ int main(int, char**)
 		ImGui_ImplGlfw_NewFrame();
 		ImGui::NewFrame();
 
-
 		{
 			auto puertos = EnumerateComPorts();
 
@@ -462,7 +452,7 @@ int main(int, char**)
 			}
 
 			ImGui::Text("Tiempo transcurrido: %.1fs", elapsed_time);
-			ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / io.Framerate, io.Framerate);
+			ImGui::Text("Application average %.2f ms/frame (%.1f FPS)", 1000.0f / io.Framerate, io.Framerate);
 			ImGui::SliderInt("Stride", &stride, 1, 32);
 
 			if (ImPlot::BeginAlignedPlots("Grupo")) {
@@ -489,27 +479,26 @@ int main(int, char**)
 				//	ImPlot::EndPlot();
 				//}
 
-				if (ImPlot::BeginPlot("Salida", { -1,0 }, ImPlotFlags_NoLegend)) {
-					ImPlot::SetupAxisLinks(ImAxis_X1, linked_xmin, linked_xmax);
-					ImPlot::SetupAxisLinks(ImAxis_Y1, linked_ymin, linked_ymax);
+				//if (ImPlot::BeginPlot("Salida", { -1,0 }, ImPlotFlags_NoLegend)) {
+				//	ImPlot::SetupAxisLinks(ImAxis_X1, linked_xmin, linked_xmax);
+				//	ImPlot::SetupAxisLinks(ImAxis_Y1, linked_ymin, linked_ymax);
 
-					ImPlot::SetupAxisFormat(ImAxis_Y1, MetricFormatter, (void*)"V");
-					ImPlot::SetupAxisFormat(ImAxis_X1, MetricFormatter, (void*)"s");
-					ImPlot::SetupAxisLimits(ImAxis_Y1, -7, 7, ImGuiCond_FirstUseEver);
-					ImPlot::SetupAxisLimits(ImAxis_X1, left_limit, right_limit, serial_started ? ImGuiCond_Always : ImGuiCond_None);
+				//	ImPlot::SetupAxisFormat(ImAxis_Y1, MetricFormatter, (void*)"V");
+				//	ImPlot::SetupAxisFormat(ImAxis_X1, MetricFormatter, (void*)"s");
+				//	ImPlot::SetupAxisLimits(ImAxis_Y1, -7, 7, ImGuiCond_FirstUseEver);
+				//	ImPlot::SetupAxisLimits(ImAxis_X1, left_limit, right_limit, serial_started ? ImGuiCond_Always : ImGuiCond_None);
 
-					ImPlot::PlotLine("", out_scrollX->data(), out_scrollY->data(), draw_size, 0, 0, byte_stride);
-					ImPlot::EndPlot();
-				}
+				//	ImPlot::PlotLine("", out_scrollX->data(), out_scrollY->data(), draw_size, 0, 0, byte_stride);
+				//	ImPlot::EndPlot();
+				//}
 				ImPlot::EndAlignedPlots();
 			}
 
 			if (ImGui::CollapsingHeader("Análisis")) {
 				if (ImPlot::BeginPlot("Espectro", { -1, 0 }, ImPlotFlags_NoLegend)) {
 					std::async([&] {
-						std::transform(scrollY->data(), scrollY->data() + muestras, in.data(), [](double d) { return d; });
-						fftw_execute(p);
-						std::transform(out, out + out_N, fourier.data(), magnitude);
+						fft.SetData(scrollY->data(), muestras);
+						fft.Compute();
 					});
 
 					ImPlot::SetupAxisFormat(ImAxis_Y1, MetricFormatter, (void*)"V");
@@ -517,10 +506,10 @@ int main(int, char**)
 					ImPlot::SetupAxis(ImAxis_X1, nullptr, ImPlotAxisFlags_AutoFit);
 					ImPlot::SetupAxis(ImAxis_Y1, nullptr, ImPlotAxisFlags_AutoFit);
 
-					ImPlot::SetupAxisScale(ImAxis_X1, ImPlotScale_Log10);
-					ImPlot::SetupAxisScale(ImAxis_Y1, scale, inverse_scale);
+					//ImPlot::SetupAxisScale(ImAxis_X1, ImPlotScale_Log10);
+					//ImPlot::SetupAxisScale(ImAxis_Y1, scale, inverse_scale);
 
-					ImPlot::PlotStems("", fourier_x.data(), fourier.data(), out_N);
+					fft.Draw(frecuencia_muestreo);
 					ImPlot::EndPlot();
 				}
 			}
@@ -528,7 +517,7 @@ int main(int, char**)
 			ImGui::SliderInt("Máximo", &maximo, 0, 256);
 			ImGui::SliderInt("Mínimo", &minimo, 0, 256);
 
-			ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / io.Framerate, io.Framerate);
+			ImGui::Text("Application average %.2f ms/frame (%.1f FPS)", 1000.0f / io.Framerate, io.Framerate);
 			ImGui::End();
 		}
 

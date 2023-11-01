@@ -26,11 +26,11 @@ public:
 	}
 
 	template <typename T>
-	bool put(const T value) {
+	bool put(T value) {
 		if (output_queue.available() < sizeof(T))
 			return false;
 
-		output_queue.write(&value, sizeof(T));
+		output_queue.write((uint8_t*)&value, sizeof(T));
 		return true;
 	}
 
