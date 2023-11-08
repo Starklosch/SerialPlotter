@@ -16,6 +16,11 @@ FFT::FFT(size_t sample_count) :
 	p = fftw_plan_dft_r2c_1d(sample_count, samples.data(), complex, FFTW_ESTIMATE);
 }
 
+FFT::~FFT()
+{
+	fftw_free(complex);
+}
+
 void FFT::Draw(double sampling_frequency) {
 	ImPlot::PlotStems("", amplitudes.data(), amplitudes.size(), 0, sampling_frequency / samples.size());
 }
@@ -31,5 +36,7 @@ void FFT::SetData(const double* data, size_t count) {
 
 void FFT::Compute() {
 	fftw_execute(p);
-	std::transform(complex, complex + out_size, amplitudes.begin(), magnitude);
+	std::transform(complex, complex + out_size, amplitudes.begin(), [=](fftw_complex complex) {
+		return sqrt(complex[0] * complex[0] + complex[1] * complex[1]) / out_size;
+	});
 }

@@ -13,6 +13,7 @@ class FFT {
 
 public:
 	FFT(size_t sample_count);
+	~FFT();
 
 	void Draw(double sampling_frequency);
 

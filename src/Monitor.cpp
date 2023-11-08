@@ -1,10 +1,27 @@
 #include "Monitor.h"
 
 Monitor::Monitor(size_t input_capacity, size_t output_capacity, size_t buffer_size) :
-	input_queue(input_capacity), output_queue(output_capacity), buffer_size(buffer_size)
+	input_queue(input_capacity),
+	output_queue(output_capacity),
+	buffer_size(buffer_size)
 {
 	input_buffer = new uint8_t[buffer_size * 2];
 	output_buffer = &input_buffer[buffer_size];
+}
+
+Monitor::Monitor(Monitor&& other) :
+	buffer_size(other.buffer_size),
+	input_buffer(other.input_buffer),
+	output_buffer(other.output_buffer),
+	input_queue(std::move(other.input_queue)),
+	output_queue(std::move(other.output_queue))
+{
+	other.input_buffer = nullptr;
+}
+
+Monitor::~Monitor() {
+	stop();
+	delete[] input_buffer;
 }
 
 void Monitor::start(const char* port, uint32_t baud) {
@@ -32,8 +49,7 @@ void Monitor::read_from_serial() {
 	while (do_work) {
 		int bytes_read = serial.read(input_buffer, buffer_size);
 		if (bytes_read) {
-			if (input_queue.write(input_buffer, bytes_read) < bytes_read)
-				throw std::exception("Buffer de lectura lleno");
+			input_queue.write(input_buffer, bytes_read);
 			if (read_callback)
 				std::async(std::launch::async, read_callback, bytes_read);
 		}
@@ -41,9 +57,6 @@ void Monitor::read_from_serial() {
 }
 
 size_t Monitor::write(const uint8_t* buffer, int count) {
-	if (output_queue.available() < count)
-		throw std::exception("Buffer de escritura lleno");
-
 	return output_queue.write(buffer, count);
 }
 
@@ -64,7 +77,7 @@ void Monitor::stop() {
 		output_thread.join();
 }
 
-Monitor::~Monitor() {
-	stop();
-	delete[] input_buffer;
+bool Monitor::started()
+{
+	return do_work;
 }

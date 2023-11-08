@@ -6,15 +6,17 @@
 class Monitor {
 public:
 	Monitor(size_t input_capacity, size_t output_capacity, size_t buffer_size);
+	Monitor(const Monitor& other) = delete;
+	Monitor(Monitor&& other);
 
 	~Monitor();
 
 	void start(const char* port, uint32_t baud);
-
 	void stop();
 
-	size_t available();
+	bool started();
 
+	size_t available();
 	size_t pending();
 
 	template <typename T>
@@ -48,7 +50,7 @@ private:
 	Serial serial;
 	std::thread input_thread, output_thread;
 
-	int buffer_size;
+	size_t buffer_size;
 	uint8_t* input_buffer, * output_buffer;
 	Buffer<uint8_t> input_queue, output_queue;
 };

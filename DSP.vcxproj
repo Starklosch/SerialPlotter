@@ -205,7 +205,8 @@
     <ClInclude Include="src\FFT.h" />
     <ClInclude Include="src\Monitor.h" />
     <ClInclude Include="src\Serial.h" />
-    <ClInclude Include="tests.h" />
+    <ClInclude Include="src\tests.h" />
+    <ClInclude Include="src\ventanas.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
