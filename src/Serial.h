@@ -10,23 +10,20 @@ void printErrorMessage(DWORD error = -1);
 std::vector<std::string> EnumerateComPorts();
 
 class Serial {
-	HANDLE file = 0;
-	//OVERLAPPED write_overlapped = {};
-	//OVERLAPPED read_overlapped = {};
+    HANDLE file = 0;
+    //OVERLAPPED write_overlapped = {};
+    //OVERLAPPED read_overlapped = {};
 
 public:
-	~Serial();
+    ~Serial();
 
-	bool open(const char* port, int baud = 9600);
+    bool open(const char* port, int baud = 9600);
 
-	int read(uint8_t* buffer, int size);
+    int read(uint8_t* buffer, int size);
 
-	int write(uint8_t* buffer, int size);
+    int write(uint8_t* buffer, int size);
 
-	int read_overlapped(uint8_t* buffer, int size);
-	int write_overlapped(uint8_t* buffer, int size);
+    void close();
 
-	void close();
-
-	size_t available();
+    size_t available();
 };
