@@ -7,35 +7,8 @@
 // - Documentation        https://dearimgui.com/docs (same as your local docs/ folder).
 // - Introduction, links and more at the top of imgui.cpp
 
+#include "main.h"
 
-#include <glad/glad.h>
-#include <GLFW/glfw3.h> // Will drag system OpenGL headers
-
-#include <thread>
-#include <queue>
-#include <fstream>
-#include <chrono>
-#include <set>
-#include <type_traits>
-#include <concepts>
-
-#include <imgui.h>
-#include <imgui_impl_glfw.h>
-#include <imgui_impl_opengl3.h>
-
-#include <implot.h>
-#include <imgui_internal.h>
-
-#include "Serial.h"
-#include "Buffers.h"
-#include "Monitor.h"
-#include "FFT.h"
-#include "tests.h"
-
-static void glfw_error_callback(int error, const char* description)
-{
-    fprintf(stderr, "GLFW Error %d: %s\n", error, description);
-}
 
 float width = 1280, height = 720;
 const int bauds[] = { 1200, 2400, 4800, 9600, 14400, 19200, 38400, 57600, 115200, 230400, 250000, 460800, 500000, 921600, 1000000, 2000000 };
@@ -46,16 +19,41 @@ void window_resize(GLFWwindow* window, int w, int h) {
     height = h;
 }
 
+bool minimized = false;
+void window_minimized(GLFWwindow* window, int _minimized) {
+    minimized = _minimized;
+}
+
+bool focused = true;
+void window_focused(GLFWwindow* window, int _focused) {
+    focused = _focused;
+}
+
+std::string MetricFormatter(double value, std::string_view unit) {
+    static double v[] = { 1e12, 1e9, 1e6, 1e3, 1, 1e-3, 1e-6, 1e-9, 1e-12 };
+    static const char* p[] = { "T", "G", "M", "k", "", "m", "u", "n", "p" };
+
+    if (value == 0) {
+        return "";
+    }
+
+    for (int i = 0; i < std::size(p); ++i) {
+        if (fabs(value) >= v[i]) {
+            return std::format("{:g} {}{}", value / v[i], p[i], unit);
+        }
+    }
+}
+
 int MetricFormatter(double value, char* buff, int size, void* data) {
     const char* unit = (const char*)data;
-    static double v[] = { 1e12, 1e9, 1e6, 1e3, 1, 1e-3, 1e-6, 1e-9, 1e-12};
+    static double v[] = { 1e12, 1e9, 1e6, 1e3, 1, 1e-3, 1e-6, 1e-9, 1e-12 };
     static const char* p[] = { "T", "G", "M", "k", "", "m", "u", "n", "p" };
 
     if (value == 0) {
         return snprintf(buff, size, "0 %s", unit);
     }
 
-    for (int i = 0; i < 7; ++i) {
+    for (int i = 0; i < std::size(p); ++i) {
         if (fabs(value) >= v[i]) {
             return snprintf(buff, size, "%g %s%s", value / v[i], p[i], unit);
         }
@@ -80,7 +78,7 @@ bool Button(const char* label, bool disabled = false) {
 }
 
 template <class Container, typename T>
-void select_menu(const char* title, T & selection, const Container& values, std::function<std::string(T)> to_string, const char* empty_msg = "Vacio") {
+void select_menu(const char* title, T& selection, const Container& values, std::function<std::string(T)> to_string, const char* empty_msg = "Vacio") {
     if (!ImGui::BeginMenu(title))
         return;
 
@@ -90,7 +88,7 @@ void select_menu(const char* title, T & selection, const Container& values, std:
     }
 
     bool selected = true;
-    for (const auto &value : values){
+    for (const auto& value : values) {
         auto str = to_string(value);
         if (ImGui::MenuItem(str.c_str(), nullptr, value == selection ? &selected : nullptr)) {
             selection = value;
@@ -101,7 +99,29 @@ void select_menu(const char* title, T & selection, const Container& values, std:
 }
 
 template <class Container, typename T>
-void combo(const char* title, T & selection, const Container& values, std::function<std::string(T)> to_string, const char* empty_msg = "Vacio") {
+void select_menu2(const char* title, T& selection, std::function<Container()> get_values, std::function<std::string(T)> to_string, const char* empty_msg = "Vacio") {
+    if (!ImGui::BeginMenu(title))
+        return;
+
+    Container values = get_values();
+    if (std::empty(values)) {
+        ImGui::Text(empty_msg);
+        return;
+    }
+
+    bool selected = true;
+    for (const auto& value : values) {
+        auto str = to_string(value);
+        if (ImGui::MenuItem(str.c_str(), nullptr, value == selection ? &selected : nullptr)) {
+            selection = value;
+        }
+    }
+
+    ImGui::EndMenu();
+}
+
+template <class Container, typename T>
+void combo(const char* title, T& selection, const Container& values, std::function<std::string(T)> to_string, const char* empty_msg = "Vacio") {
     auto str = to_string(selection);
     if (!ImGui::BeginCombo(title, str.c_str()))
         return;
@@ -111,7 +131,7 @@ void combo(const char* title, T & selection, const Container& values, std::funct
         return;
     }
 
-    for (const auto &value : values){
+    for (const auto& value : values) {
         auto str = to_string(value);
         bool selected = value == selection;
         if (ImGui::Selectable(str.c_str(), &selected)) {
@@ -123,10 +143,10 @@ void combo(const char* title, T & selection, const Container& values, std::funct
 }
 
 void MenuPuertos(std::string& selected_port) {
-    auto puertos = EnumerateComPorts();
+    //auto puertos = EnumerateComPorts();
     std::function to_string = [](std::string s) { return s; };
 
-    select_menu("Puerto", selected_port, puertos, to_string, "No hay ningún dispositivo conectado");
+    select_menu2("Puerto", selected_port, std::function(EnumerateComPorts), to_string, "No hay ningún dispositivo conectado");
 }
 
 void MenuBaudRate(int& selected) {
@@ -150,304 +170,472 @@ void ComboPuertos(std::string& selected_port) {
 
 void ComboBaudRate(int& selected) {
     std::function to_string = [](int n) { return std::to_string(n); };
-    
+
     int selection = selected;
     combo("Velocidad", selected, bauds, to_string);
 }
 
-struct Configuracion {
-    int frecuencia_muestreo = 960;
-    int baud_rate = 9600;
-    int muestras = frecuencia_muestreo;
-    std::string puerto;
+struct Settings {
+    int sampling_rate = 3840;
+    int baud_rate = sampling_rate * 10;
+    int samples = sampling_rate;
+    std::string port = "COM5";
 
-    bool abierta = false;
+    int maximum = 49, minimum = 175;
+    int stride = 4;
+    int byte_stride = sizeof(double) * stride;
+
+    double map_factor = 12.0 / (maximum - minimum);
+
+    bool show_frame_time = false;
+    bool open = false;
 };
 
-class VentanaConfiguracion {
-    Configuracion& config;
-    bool& abierta;
+class SettingsWindow {
+    Settings& settings;
+    bool& open;
 
 public:
-    VentanaConfiguracion(Configuracion& config) : config(config), abierta(config.abierta)
+    SettingsWindow(Settings& settings) : settings(settings), open(settings.open)
     {
     }
 
-    void Abrir() {
-        abierta = !abierta;
+    void Toggle() {
+        open = !open;
     }
 
-    void Dibujar() {
-        if (!abierta)
+    void Draw() {
+        using namespace ImGui;
+        static int stride_exp = 2;
+
+        if (!open)
             return;
 
-        ImGui::Begin("Configuración", &abierta);
+        Begin("Configuración", &open);
 
-        ComboFrecuenciaMuestreo(config.frecuencia_muestreo);
-        ComboBaudRate(config.baud_rate);
-        ComboPuertos(config.puerto);
+        ComboFrecuenciaMuestreo(settings.sampling_rate);
+        ComboBaudRate(settings.baud_rate);
+        ComboPuertos(settings.port);
 
-        ImGui::End();
+        settings.samples = settings.sampling_rate;
+
+        if (TreeNode("Mapeo")) {
+            SliderInt("Máximo", &settings.maximum, 0, 255);
+            SliderInt("Mínimo", &settings.minimum, 0, 255);
+            settings.map_factor = 12.0 / (settings.maximum - settings.minimum);
+            TreePop();
+        }
+
+        if (TreeNode("Rendimiento")) {
+            if (SliderInt("Stride", &stride_exp, 0, 10)) {
+                settings.stride = exp2(stride_exp);
+                settings.byte_stride = sizeof(double) * settings.stride;
+            }
+            SetItemTooltip("Dibuja 1 de cada 2^n muestras para mejorar el rendimiento.");
+
+            Checkbox("Mostrar tiempo de renderizado", &settings.show_frame_time);
+            TreePop();
+        }
+
+        End();
     }
 };
 
-struct Plotter {
+Iir::Butterworth::LowPass<8> lowpass_filter;
+Iir::Butterworth::HighPass<8> highpass_filter;
+
+class MainWindow {
     using clock = std::chrono::high_resolution_clock;
     using time_point = clock::time_point;
     using duration = std::chrono::duration<double>;
 
-    Monitor monitor = Monitor(16 * 1024, 4 * 1024, 1024);
+    enum class Filter {
+        None,
+        LowPass,
+        HighPass
+    };
 
-    FFT *fft = nullptr;
-    ScrollBuffer<double>* scrollX = nullptr, * scrollY = nullptr,
-        * out_scrollX = nullptr, * out_scrollY = nullptr;
-    float* xs = nullptr, * ys = nullptr;
+    Serial serial;
+    std::thread serial_thread, analysis_thread;
+    std::mutex analysis_mutex;
+    std::condition_variable analysis_cv;
 
-    int max_time = 60;
+    FFT* fft = nullptr;
+    ScrollBuffer<double>* scrollX = nullptr, * scrollY = nullptr, * filter_scrollY = nullptr;
+
+    int max_time = 120;
     int read_frequency = 30;
-    float factor = 1;
 
-    float show_time = 5 * factor;
     float offset = 0;
 
-    float max_time_visible = 10 * factor;
-    float max_time_scale = 10.0f;
-    float min_time_scale = 5e-4;
+    float max_time_visible = 5;
 
     time_point start_time = clock::now();
 
-    bool avanzar = true;
-    int draw_size = 0;
-    int maximo = 0, minimo = 255;
-
     int max = 0;
 
+    // Límites del gráfico de entrada y filtrado
     double left_limit = 0, right_limit = max_time_visible;
-    double ymin = -7, ymax = 7;
-    double* linked_xmin = &left_limit, * linked_xmax = &right_limit;
-    double* linked_ymin = &ymin, * linked_ymax = &ymax;
+    double down_limit = -7, up_limit = 7;
 
-    float next_time = 0;
+    double next_time = 0;
 
+    // Cantidad de puntos a dibujar
     size_t size = 0;
 
     std::vector<uint8_t> read_buffer, write_buffer;
 
-    Configuracion& config;
-    VentanaConfiguracion& ventanaConfig;
-    std::function<double(double)> filtro;
+    Settings& settings;
+    SettingsWindow& settingsWindow;
 
-    Plotter(Configuracion& config, VentanaConfiguracion& ventanaConfig) :
-        config(config), ventanaConfig(ventanaConfig)
+    int min_cutoff_frequency = 1, max_cutoff_frequency = 100;
+    int cutoff_frequency[3] = { 0, 20, 100 };
+    Filter selected_filter = Filter::LowPass;
+
+public:
+    MainWindow(Settings& config, SettingsWindow& ventanaConfig) :
+        settings(config), settingsWindow(ventanaConfig)
     {
-        CrearBuffers();
-        ConfigurarMonitor();
+        CreateBuffers();
+
+        lowpass_filter.setup(settings.sampling_rate, cutoff_frequency[1]);
+        highpass_filter.setup(settings.sampling_rate, cutoff_frequency[2]);
     }
 
-    ~Plotter()
+    ~MainWindow()
     {
-        monitor.stop();
-        DestruirBuffers();
+        Stop();
+        DestroyBuffers();
     }
 
-    void CrearBuffers() {
-        int speed = config.frecuencia_muestreo;
+private:
+    void CreateBuffers() {
+        int speed = settings.sampling_rate;
         int max_size = speed * max_time;
         size = 0;
-        int view_size = max_time_visible * speed;
+        int view_size = 30 * speed;
         next_time = 0;
 
-        DestruirBuffers();
-        read_buffer.resize(1024);
-        write_buffer.resize(1024);
+        DestroyBuffers();
+        read_buffer.resize(128);
+        write_buffer.resize(128);
 
-        fft = new FFT(config.frecuencia_muestreo);
+        fft = new FFT(settings.sampling_rate);
         scrollX = new ScrollBuffer<double>(max_size, view_size);
         scrollY = new ScrollBuffer<double>(max_size, view_size);
-        out_scrollX = new ScrollBuffer<double>(max_size, view_size);
-        out_scrollY = new ScrollBuffer<double>(max_size, view_size);
-        xs = new float[view_size];
-        ys = new float[view_size];
+        filter_scrollY = new ScrollBuffer<double>(max_size, view_size);
     }
 
-    void DestruirBuffers() {
+    void DestroyBuffers() {
         delete scrollX;
         delete scrollY;
-        delete out_scrollX;
-        delete out_scrollY;
-        delete[] xs;
-        delete[] ys;
+        delete filter_scrollY;
     }
 
-    double transformacion (uint8_t v) {
-        return (v - minimo) / (double)(maximo - minimo) * 12 - 6;
+    double TransformSample(uint8_t v) {
+        return (v - settings.minimum) * settings.map_factor - 6;
     };
 
-    int transformacion_inversa (double v) {
-        double resultado = round((v + 6) * (maximo - minimo) / 12.0 + minimo);
-        if (resultado < 0)
+    uint8_t InverseTransformSample(double v) {
+        double result = round((v + 6) * (settings.maximum - settings.minimum) / 12.0 + settings.minimum);
+        if (result < 0)
             return 0;
-        if (resultado > 255)
+        if (result > 255)
             return 255;
-        return (int)resultado;
+        return (int)result;
     };
 
-    void ConfigurarMonitor() {
-        monitor.read_callback = [&](int available) {
-            int read = monitor.read(read_buffer.data(), read_buffer.size());
+    bool started = false;
+    void ToggleConnection() {
+        if (!started) {
+            if (settings.port.empty())
+                return;
+
+            Start();
+        }
+        else {
+            Stop();
+        }
+        started = !started;
+    }
+
+    void Start() {
+        CreateBuffers();
+
+        left_limit = 0, right_limit = max_time_visible;
+
+        // Reiniciar filtro
+        lowpass_filter.reset();
+        highpass_filter.reset();
+
+        // Iniciar serial e hilos
+        do_serial_work = true;
+        do_analysis_work = true;
+        analysis_thread = std::thread(&MainWindow::AnalysisWorker, this);
+
+        serial.open(settings.port, settings.baud_rate);
+        serial_thread = std::thread(&MainWindow::SerialWorker, this);
+        start_time = clock::now();
+    }
+
+    void Stop() {
+        do_serial_work = false;
+        do_analysis_work = false;
+        analysis_cv.notify_one();
+
+        if (serial_thread.joinable())
+            serial_thread.join();
+        if (analysis_thread.joinable())
+            analysis_thread.join();
+        serial.close();
+    }
+
+    void SelectFilter(Filter filter) {
+        selected_filter = filter;
+        switch (selected_filter)
+        {
+        case Filter::LowPass:
+            min_cutoff_frequency = 1;
+            max_cutoff_frequency = settings.sampling_rate / 4;
+            break;
+        case Filter::HighPass:
+            min_cutoff_frequency = settings.sampling_rate / 4;
+            max_cutoff_frequency = settings.sampling_rate / 2 - 1;
+            break;
+        }
+    }
+
+    void SetupFilter() {
+        switch (selected_filter)
+        {
+        case Filter::LowPass:
+            lowpass_filter.setup(settings.sampling_rate, cutoff_frequency[1]);
+            break;
+        case Filter::HighPass:
+            highpass_filter.setup(settings.sampling_rate, cutoff_frequency[2]);
+            break;
+        }
+    }
+
+    void ResetFilters() {
+        lowpass_filter.reset();
+        highpass_filter.reset();
+    }
+
+    bool do_serial_work = true;
+    bool filter_open = false;
+    void SerialWorker() {
+        while (do_serial_work) {
+            // Es importante trabajar con muy pocas muestras.
+            // Si trabajamos con todas las que están disponibles se produce un tiempo muerto.
+            int read = serial.read(read_buffer.data(), 1);
 
             for (size_t i = 0; i < read; i++)
             {
-                double transformado = transformacion(read_buffer[i]);
+                double transformado = TransformSample(read_buffer[i]);
 
                 scrollY->push(transformado);
                 scrollX->push(next_time);
 
-                double resultado = filtro ? transformado : filtro(transformado);
+                double resultado = transformado;
 
-                // Filtro
-                out_scrollY->push(resultado);
-                out_scrollX->push(next_time);
-                next_time += 1.0f / config.frecuencia_muestreo;
+                switch (selected_filter)
+                {
+                case Filter::LowPass:
+                    resultado = lowpass_filter.filter(transformado);
+                    break;
+                case Filter::HighPass:
+                    resultado = highpass_filter.filter(transformado);
+                    break;
+                }
 
-                write_buffer[i] = transformacion_inversa(resultado);
+                filter_scrollY->push(resultado);
+                next_time += 1.0 / settings.sampling_rate;
+
+                write_buffer[i] = 255 - InverseTransformSample(resultado);
             }
 
-            monitor.write(write_buffer.data(), read);
-
+            serial.write(write_buffer.data(), read);
             size = scrollX->count();
-        };
-    }
-
-    void Conectar() {
-        if (!monitor.started()) {
-            if (config.puerto.empty())
-                return;
-
-            left_limit = 0, right_limit = max_time_visible;
-            CrearBuffers();
-            monitor.start(config.puerto.c_str(), config.baud_rate);
-            start_time = clock::now();
-            linked_xmin = linked_xmax = nullptr;
-        }
-        else {
-            monitor.stop();
-            linked_xmin = &left_limit;
-            linked_xmax = &right_limit;
         }
     }
 
-    void Dibujar() {
+    bool do_analysis_work = true;
+    void AnalysisWorker() {
+        while (do_analysis_work) {
+            std::unique_lock lock(analysis_mutex);
+            analysis_cv.wait(lock);
+
+            if (!fft || !scrollY)
+                continue;
+
+            size_t available = scrollY->count();
+            size_t max = settings.sampling_rate;
+            size_t count = available > max ? max : available;
+
+            auto end = scrollY->data() + available;
+            fft->SetData(end - count, count);
+            fft->Compute();
+
+            std::this_thread::sleep_for(100ms);
+        }
+    }
+
+    float statusbar_height = 30;
+public:
+    void Draw() {
         static double last_time = glfwGetTime();
-        static int stride_exp = 2, stride = 4;
         static double elapsed_time = 0;
-        int byte_stride = sizeof(double) * stride;
 
         double now = glfwGetTime();
-        double frame_time = (now - last_time) * 1000;
         last_time = now;
 
-        draw_size = size / stride;
-        if (monitor.started()) {
+        double draw_size = size / settings.stride;
+        if (started) {
             elapsed_time = duration(clock::now() - start_time).count();
 
             if (elapsed_time > max_time_visible) {
                 right_limit = scrollX->back();
                 left_limit = right_limit - max_time_visible;
             }
+            offset = left_limit;
         }
 
         ImGui::SetNextWindowPos({ 0, 0 });
-        ImGui::SetNextWindowSize({ width, height });
+        ImGui::SetNextWindowSize({ width, height - statusbar_height });
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0);
         ImGui::Begin("Ventana principal", 0, ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_MenuBar | ImGuiWindowFlags_NoBringToFrontOnFocus);
+        ImGui::PopStyleVar();
 
         if (ImGui::BeginMenuBar())
         {
-            MenuPuertos(config.puerto);
-            MenuBaudRate(config.baud_rate);
+            MenuPuertos(settings.port);
+            MenuBaudRate(settings.baud_rate);
 
             if (ImGui::Button("Configuración"))
-                ventanaConfig.Abrir();
+                settingsWindow.Toggle();
 
-            if (Button(monitor.started() ? "Desconectar" : "Conectar", config.puerto.empty())) {
-                Conectar();
+            if (Button(started ? "Desconectar" : "Conectar", settings.port.empty())) {
+                ToggleConnection();
             }
-            if (config.puerto.empty()) {
+            if (settings.port.empty()) {
                 ImGui::SetItemTooltip("Selecciona un dispositivo primero");
             }
             ImGui::EndMenuBar();
         }
 
-        ImGui::Text("Tiempo transcurrido: %.1fs", elapsed_time);
-        ImGui::Text("Application average %.2f ms/frame (%.1f FPS)", frame_time, 1000 / frame_time);
-        if (ImGui::SliderInt("Stride", &stride_exp, 0, 10)) {
-            stride = exp2(stride_exp);
+        if (ImPlot::BeginPlot("Entrada", { -1,0 }, ImPlotFlags_NoLegend)) {
+            // Los cambios de posición en una gráfica tienen efectos sobre la otra
+            ImPlot::SetupAxisLinks(ImAxis_X1, &left_limit, &right_limit);
+            ImPlot::SetupAxisLinks(ImAxis_Y1, &down_limit, &up_limit);
+
+            ImPlot::SetupAxisFormat(ImAxis_Y1, MetricFormatter, (void*)"V");
+            ImPlot::SetupAxisFormat(ImAxis_X1, MetricFormatter, (void*)"s");
+
+            ImPlot::SetupAxisLimits(ImAxis_Y1, -7, 7, ImGuiCond_FirstUseEver);
+            ImPlot::SetupAxisLimits(ImAxis_X1, left_limit, right_limit, started ? ImGuiCond_Always : ImGuiCond_None);
+
+            ImPlot::SetupAxisLimitsConstraints(ImAxis_X1, 0, INFINITY);
+
+            ImPlot::PlotLine("", scrollX->data(), scrollY->data(), draw_size, 0, 0, settings.byte_stride);
+            ImPlot::EndPlot();
         }
 
-        if (ImPlot::BeginAlignedPlots("Grupo")) {
-            if (ImPlot::BeginPlot("Entrada", { -1,0 }, ImPlotFlags_NoLegend)) {
-                ImPlot::SetupAxisLinks(ImAxis_X1, linked_xmin, linked_xmax);
-                ImPlot::SetupAxisLinks(ImAxis_Y1, linked_ymin, linked_ymax);
+        filter_open = ImGui::CollapsingHeader("Filtro");
+        if (filter_open) {
+            if (ImPlot::BeginPlot("Salida", { -1,0 }, ImPlotFlags_NoLegend)) {
+                ImPlot::SetupAxisLinks(ImAxis_X1, &left_limit, &right_limit);
+                ImPlot::SetupAxisLinks(ImAxis_Y1, &down_limit, &up_limit);
 
                 ImPlot::SetupAxisFormat(ImAxis_Y1, MetricFormatter, (void*)"V");
                 ImPlot::SetupAxisFormat(ImAxis_X1, MetricFormatter, (void*)"s");
 
                 ImPlot::SetupAxisLimits(ImAxis_Y1, -7, 7, ImGuiCond_FirstUseEver);
-                ImPlot::SetupAxisLimits(ImAxis_X1, left_limit, right_limit, monitor.started() ? ImGuiCond_Always : ImGuiCond_None);
+                ImPlot::SetupAxisLimits(ImAxis_X1, left_limit, right_limit, started ? ImGuiCond_Always : ImGuiCond_None);
 
-                ImPlot::PlotLine("", scrollX->data(), scrollY->data(), draw_size, 0, 0, byte_stride);
+                ImPlot::SetupAxisLimitsConstraints(ImAxis_X1, 0, INFINITY);
+
+                ImPlot::PlotLine("", scrollX->data(), filter_scrollY->data(), draw_size, 0, 0, settings.byte_stride);
                 ImPlot::EndPlot();
             }
 
-            if (ImGui::CollapsingHeader("Filtro")) {
-                ImGui::Text("Sin implementar");
+            const char* nombres[] = {"Ninguno", "Pasa bajos", "Pasa altos"};
+            for (int i = 0; i < std::size(nombres); i++)
+            {
+                if (i > 0)
+                    ImGui::SameLine();
+
+                if (i == (int)selected_filter) {
+                    ImGui::PushStyleColor(ImGuiCol_Button, (ImVec4)ImColor(0xFFfa9642));
+                    ImGui::Button(nombres[i]);
+                    ImGui::PopStyleColor();
+                }
+                else {
+                    if (ImGui::Button(nombres[i])) {
+                        SelectFilter((Filter)i);
+                        ResetFilters();
+                    }
+                }
             }
 
-            ImPlot::EndAlignedPlots();
-        }
 
+            if (selected_filter != Filter::None
+                && ImGui::SliderInt("Frecuencia de corte", &cutoff_frequency[(int)selected_filter], min_cutoff_frequency, max_cutoff_frequency)){
+                SetupFilter();
+                ResetFilters();
+            }
+        }
 
         if (ImGui::CollapsingHeader("Análisis")) {
+            analysis_cv.notify_one();
             if (ImPlot::BeginPlot("Espectro", { -1, 0 }, ImPlotFlags_NoLegend)) {
-                std::async([&] {
-                    if (!fft || !scrollY)
-                        return;
-
-                    size_t available = scrollY->count();
-                    size_t max = config.frecuencia_muestreo;
-                    size_t count = available > max ? max : available;
-
-                    auto end = scrollY->data() + available;
-                    fft->SetData(end - count, count);
-                    fft->Compute();
-                });
-
                 ImPlot::SetupAxisFormat(ImAxis_Y1, MetricFormatter, (void*)"V");
                 ImPlot::SetupAxisFormat(ImAxis_X1, MetricFormatter, (void*)"Hz");
-                ImPlot::SetupAxis(ImAxis_X1, nullptr, ImPlotAxisFlags_AutoFit);
+                ImPlot::SetupAxisLimits(ImAxis_X1, 0.99, settings.samples, ImGuiCond_FirstUseEver);
                 ImPlot::SetupAxis(ImAxis_Y1, nullptr, ImPlotAxisFlags_AutoFit);
 
-                //ImPlot::SetupAxisScale(ImAxis_X1, ImPlotScale_Log10);
-                //ImPlot::SetupAxisScale(ImAxis_Y1, scale, inverse_scale);
+                ImPlot::SetupAxisScale(ImAxis_X1, ImPlotScale_Log10);
+                ImPlot::SetupAxisLimitsConstraints(ImAxis_Y1, 0, INFINITY);
 
-                fft->Draw(config.frecuencia_muestreo);
+                fft->Plot(settings.sampling_rate);
                 ImPlot::EndPlot();
+
+                // Mostrar información adicional si hay datos
+                if (scrollY && scrollY->count() > 0) {
+                    ImGui::Text("Frecuencia: %s\tDesplazamiento %s",
+                        MetricFormatter(fft->Frequency(settings.sampling_rate), "Hz").data(),
+                        MetricFormatter(fft->Offset(), "V").data()
+                    );
+                }
             }
         }
 
-        ImGui::SliderInt("Máximo", &maximo, 0, 256);
-        ImGui::SliderInt("Mínimo", &minimo, 0, 256);
+        // Barra inferior
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+        if (ImGui::BeginViewportSideBar("Status", 0, ImGuiDir_Down, statusbar_height, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse)) {
+            ImGuiIO& io = ImGui::GetIO();
+            ImGui::Text("Tiempo transcurrido: %.1fs", elapsed_time);
+            if (settings.show_frame_time) {
+                int max = ImGui::GetContentRegionMax().x;
+                int available = max - ImGui::GetItemRectSize().x;
 
-        ImGui::Text("Application average %.2f ms/frame (%.1f FPS)", frame_time, 1000 / frame_time);
+                std::string info = std::format("Rendimiento: {:.1f} ms/frame ({:.1f} FPS)", 1000.0f / io.Framerate, io.Framerate);
+                auto info_size = ImGui::CalcTextSize(info.c_str());
+
+                ImGui::SameLine(ImGui::GetContentRegionMax().x - info_size.x);
+                ImGui::Text(info.c_str());
+            }
+            ImGui::End();
+        }
+        ImGui::PopStyleVar();
+
         ImGui::End();
     }
 };
 
-
 // Main code
 int main(int, char**)
 {
-    glfwSetErrorCallback(glfw_error_callback);
     if (!glfwInit())
         return 1;
 
@@ -480,6 +668,8 @@ int main(int, char**)
         return 1;
 
     glfwSetWindowSizeCallback(window, window_resize);
+    glfwSetWindowIconifyCallback(window, window_minimized);
+    glfwSetWindowFocusCallback(window, window_focused);
     glfwMakeContextCurrent(window);
     glfwSwapInterval(1); // Enable vsync
 
@@ -501,56 +691,52 @@ int main(int, char**)
     ImGui_ImplGlfw_InitForOpenGL(window, true);
     ImGui_ImplOpenGL3_Init(glsl_version);
 
+    ImGui::GetStyle().WindowMenuButtonPosition = ImGuiDir_None;
+
     // Our state
     ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
 
-    //std::cout << std::format("Factor {} Max {} Min {} Show_time {}\n", factor, max_time_scale, min_time_scale, show_time);
+    Settings settings;
+    SettingsWindow settings_window(settings);
 
-    int speed, max_size, view_size = 0;
+    MainWindow mainWindow(settings, settings_window);
 
-    Configuracion config;
-    VentanaConfiguracion ventanaConfig(config);
-
-    Plotter plotter(config, ventanaConfig);
-    plotter.filtro = [](double d) {
-        return d / 2;
-    };
-
-    //std::ofstream log("C:/Users/usuario/Desktop/log.txt");
-
-    ImPlotTransform scale = [](double v, void*) {
-        return sqrt(v);
-    };
-
-    ImPlotTransform inverse_scale = [](double value, void*) {
-        return value * value;
-    };
+    double last_time = glfwGetTime();
+    int minimized_fps = 20;
+    double minimized_frametime = 1.0 / minimized_fps;
 
     // Main loop
     while (!glfwWindowShouldClose(window))
     {
-        // Poll and handle events (inputs, window resize, etc.)
-        // You can read the io.WantCaptureMouse, io.WantCaptureKeyboard flags to tell if dear imgui wants to use your inputs.
-        // - When io.WantCaptureMouse is true, do not dispatch mouse input data to your main application, or clear/overwrite your copy of the mouse data.
-        // - When io.WantCaptureKeyboard is true, do not dispatch keyboard input data to your main application, or clear/overwrite your copy of the keyboard data.
-        // Generally you may always pass all inputs to dear imgui, and hide them from your application based on those two flags.
-        glfwPollEvents();
+        // Espera para procesar los eventos si la ventana está minimizada 
+        if (minimized)
+            glfwWaitEvents();
+        else
+            glfwPollEvents();
 
+        // Limitar FPS y uso de CPU si la ventana está abierta pero no tiene foco
+        if (!focused) {
+            if (minimized_frametime > 0.02)
+                std::this_thread::sleep_for(std::chrono::duration<double>(minimized_frametime - 0.02));
+
+            double elapsed = glfwGetTime() - last_time;
+            while (elapsed < minimized_frametime)
+                elapsed = glfwGetTime() - last_time;
+            last_time = glfwGetTime();
+        }
+    
         // Start the Dear ImGui frame
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
 
-        {
-            plotter.Dibujar();
-            ventanaConfig.Dibujar();
-        }
+        mainWindow.Draw();
+        settings_window.Draw();
 
         glViewport(0, 0, width, height);
         glClearColor(clear_color.x * clear_color.w, clear_color.y * clear_color.w, clear_color.z * clear_color.w, clear_color.w);
         glClear(GL_COLOR_BUFFER_BIT);
 
-        // Rendering
         ImGui::Render();
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
@@ -568,6 +754,5 @@ int main(int, char**)
 
     glfwDestroyWindow(window);
     glfwTerminate();
-
     return 0;
 }

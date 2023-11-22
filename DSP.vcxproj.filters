@@ -77,7 +77,7 @@
     <ClInclude Include="src\tests.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="src\ventanas.h">
+    <ClInclude Include="src\main.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

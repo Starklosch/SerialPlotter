@@ -196,6 +196,7 @@
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">false</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</ExcludedFromBuild>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="src\Monitor.cpp" />
     <ClCompile Include="src\Serial.cpp" />
@@ -203,10 +204,10 @@
   <ItemGroup>
     <ClInclude Include="src\Buffers.h" />
     <ClInclude Include="src\FFT.h" />
+    <ClInclude Include="src\main.h" />
     <ClInclude Include="src\Monitor.h" />
     <ClInclude Include="src\Serial.h" />
     <ClInclude Include="src\tests.h" />
-    <ClInclude Include="src\ventanas.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

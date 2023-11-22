@@ -47,30 +47,30 @@ Serial::~Serial() {
     close();
 }
 
-bool Serial::open(const char * port, int baud) {
-    auto access = GENERIC_READ | GENERIC_WRITE;
-    auto mode = OPEN_EXISTING;
-    //auto share = FILE_SHARE_READ | FILE_SHARE_WRITE;
-    auto flags = 0;
-    file = CreateFileA(port, access, 0, 0, mode, flags, 0);
+bool Serial::open(std::string port, int baud) {
+    DWORD access = GENERIC_READ | GENERIC_WRITE;
+    DWORD mode = OPEN_EXISTING;
+    DWORD flags = 0;
+
+    const std::string prefijo = "\\\\.\\";
+    if (!port.starts_with(prefijo))
+        port.insert(0, prefijo);
+    
+    file = CreateFileA(port.c_str(), access, 0, 0, mode, flags, 0);
 
     if (file == INVALID_HANDLE_VALUE) {
         printErrorMessage();
         return false;
     }
 
-    EscapeCommFunction(file, SETDTR);
-    EscapeCommFunction(file, SETRTS);
-
     SetupComm(file, 2048, 2048);
     PurgeComm(file, PURGE_RXABORT | PURGE_TXABORT | PURGE_RXCLEAR | PURGE_TXCLEAR);
     ClearCommError(file, nullptr, nullptr);
 
-    DCB state;
-    SecureZeroMemory(&state, sizeof(DCB));
-    state.DCBlength = sizeof(DCB);
+    DCB state { .DCBlength = sizeof(DCB) };
     GetCommState(file, &state);
 
+    // Configurar comunicación
     state.ByteSize = 8;
     state.BaudRate = baud;
     state.Parity = NOPARITY;
@@ -79,17 +79,15 @@ bool Serial::open(const char * port, int baud) {
     // Si están activos el Arduino se reinicia y tarda más
     state.fDtrControl = DTR_CONTROL_DISABLE;
     state.fRtsControl = RTS_CONTROL_DISABLE;
-
     SetCommState(file, &state);
-    //EscapeCommFunction(file, SETDTR);
 
     COMMTIMEOUTS timeouts;
     GetCommTimeouts(file, &timeouts);
     timeouts.ReadIntervalTimeout = 0;
     timeouts.ReadTotalTimeoutMultiplier = 0;
-    timeouts.ReadTotalTimeoutConstant = 1;
+    timeouts.ReadTotalTimeoutConstant = 1000;
     timeouts.WriteTotalTimeoutMultiplier = 0;
-    timeouts.WriteTotalTimeoutConstant = 1;
+    timeouts.WriteTotalTimeoutConstant = 1000;
     SetCommTimeouts(file, &timeouts);
     return true;
 }

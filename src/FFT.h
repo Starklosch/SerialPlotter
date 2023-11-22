@@ -11,13 +11,19 @@ class FFT {
 	std::vector<double> samples;
 	std::vector<double> amplitudes;
 
+	double offset = 0;
+	int n_frequency = 0;
+
 public:
 	FFT(size_t sample_count);
 	~FFT();
 
-	void Draw(double sampling_frequency);
+	void Plot(double sampling_frequency);
 
 	void SetData(const double* data, size_t count);
 
 	void Compute();
+
+	double Offset();
+	double Frequency(double sampling_frequency);
 };

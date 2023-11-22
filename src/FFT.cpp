@@ -1,6 +1,7 @@
 #include "FFT.h"
 
 #include <algorithm>
+#include <iostream>
 #include <implot.h>
 
 double magnitude(fftw_complex complex) {
@@ -21,7 +22,7 @@ FFT::~FFT()
     fftw_free(complex);
 }
 
-void FFT::Draw(double sampling_frequency) {
+void FFT::Plot(double sampling_frequency) {
     ImPlot::PlotStems("", amplitudes.data(), amplitudes.size(), 0, sampling_frequency / samples.size());
 }
 
@@ -34,9 +35,32 @@ void FFT::SetData(const double* data, size_t count) {
     std::copy(data, data + count, samples.begin());
 }
 
+//const float threshold = 1e-15;
 void FFT::Compute() {
     fftw_execute(p);
     std::transform(complex, complex + out_size, amplitudes.begin(), [=](fftw_complex complex) {
         return sqrt(complex[0] * complex[0] + complex[1] * complex[1]) / out_size;
     });
+
+    offset = amplitudes[0];
+
+    n_frequency = 1;
+    double max_frequency = amplitudes[1];
+    for (size_t i = 1; i < amplitudes.size(); i++)
+    {
+        if (amplitudes[i] > max_frequency) {
+            max_frequency = amplitudes[i];
+            n_frequency = i;
+        }
+    }
+}
+
+double FFT::Offset()
+{
+    return offset;
+}
+
+double FFT::Frequency(double sampling_frequency)
+{
+    return n_frequency * sampling_frequency / samples.size();
 }
