@@ -4,3 +4,12 @@
 [submodule "extern/implot"]
 	path = extern/implot
 	url = https://github.com/epezent/implot
+[submodule "extern/iir1"]
+	path = extern/iir1
+	url = https://github.com/berndporr/iir1
+[submodule "extern/glfw"]
+	path = extern/glfw
+	url = https://github.com/glfw/glfw
+[submodule "extern/fftw3"]
+	path = extern/fftw3
+	url = https://github.com/FFTW/fftw3

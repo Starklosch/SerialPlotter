@@ -1,4 +1,6 @@
 .vs/
+.idea/
 bin/
 intermediate/
 build/
+imgui.ini

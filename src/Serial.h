@@ -1,20 +1,18 @@
 #pragma once
 
-#include <Windows.h>
 #include <iostream>
 #include <string>
 #include <vector>
+#include <Windows.h>
 
-void printErrorMessage(DWORD error = -1);
+void printErrorMessage(uint32_t error = -1);
 
 std::vector<std::string> EnumerateComPorts();
 
 class Serial {
-public:
-    HANDLE file = 0;
-    OVERLAPPED write_overlapped = {};
-    OVERLAPPED read_overlapped = {};
+    HANDLE file = nullptr;
 
+public:
     ~Serial();
 
     bool open(std::string port, int baud = 9600);

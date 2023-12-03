@@ -24,7 +24,7 @@ public:
 			m_data[i] = other.m_data[i + offset];
 	}
 
-	ScrollBuffer(ScrollBuffer&& other) {
+	ScrollBuffer(ScrollBuffer&& other) noexcept {
 		capacity = other.capacity;
 		m_size = other.m_size;
 		view = other.view;
@@ -43,9 +43,10 @@ public:
 		m_size = other.m_size;
 		offset = 0;
 		uint32_t copy = view < m_size ? view : m_size;
-		//std::copy(&other.data[offset], &other.data[offset + copy], data);
 		for (size_t i = 0; i < copy; i++)
 			m_data[i] = other.m_data[i + offset];
+
+        return *this;
 	}
 
 	ScrollBuffer& operator=(ScrollBuffer&& other) {
@@ -56,6 +57,7 @@ public:
 		offset = other.offset;
 		m_data = other.m_data;
 		other.m_data = nullptr;
+        return *this;
 	}
 
 	~ScrollBuffer() {

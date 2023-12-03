@@ -2,20 +2,18 @@
 #include <format>
 #include <algorithm>
 
-void printErrorMessage(DWORD error) {
+// Parte del cÃ³digo tomado de https://stackoverflow.com/a/17387176
+void printErrorMessage(uint32_t error) {
     static WCHAR messageBuffer[128];
 
-    //SetConsoleOutputCP(CP_UTF8);
     if (error == -1)
         error = GetLastError();
     HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE);
 
-    //Ask Win32 to give us the string version of that message ID.
-    //The parameters we pass in, tell Win32 to create the buffer that holds the message for us (because we don't yet know how long the message string will be).
     size_t size = FormatMessageW(FORMAT_MESSAGE_FROM_SYSTEM,
-        NULL, error, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), messageBuffer, 128, NULL);
+        nullptr, error, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), messageBuffer, 128, nullptr);
 
-    WriteConsoleW(out, messageBuffer, size, 0, 0);
+    WriteConsoleW(out, messageBuffer, size, nullptr, nullptr);
 }
 
 std::vector<std::string> EnumerateComPorts() {
@@ -32,7 +30,7 @@ std::vector<std::string> EnumerateComPorts() {
         uint8_t data[64];
         DWORD nameChars = 64, dataSize = 64;
         DWORD type;
-        result = RegEnumValueA(key, i, name, &nameChars, 0, &type, data, &dataSize);
+        result = RegEnumValueA(key, i, name, &nameChars, nullptr, &type, data, &dataSize);
 
         if (result == ERROR_SUCCESS)
             com_ports.emplace_back((char*)data);
@@ -50,13 +48,12 @@ Serial::~Serial() {
 bool Serial::open(std::string port, int baud) {
     DWORD access = GENERIC_READ | GENERIC_WRITE;
     DWORD mode = OPEN_EXISTING;
-    DWORD flags = 0;
 
     const std::string prefijo = "\\\\.\\";
     if (!port.starts_with(prefijo))
         port.insert(0, prefijo);
     
-    file = CreateFileA(port.c_str(), access, 0, 0, mode, flags, 0);
+    file = CreateFileA(port.c_str(), access, 0, 0, mode, 0, 0);
 
     if (file == INVALID_HANDLE_VALUE) {
         printErrorMessage();
@@ -70,13 +67,13 @@ bool Serial::open(std::string port, int baud) {
     DCB state { .DCBlength = sizeof(DCB) };
     GetCommState(file, &state);
 
-    // Configurar comunicación
+    // Configurar comunicaciï¿½n
     state.ByteSize = 8;
     state.BaudRate = baud;
     state.Parity = NOPARITY;
     state.StopBits = ONESTOPBIT;
 
-    // Si están activos el Arduino se reinicia y tarda más
+    // Si estï¿½n activos el Arduino se reinicia y tarda mÃ¡s
     state.fDtrControl = DTR_CONTROL_DISABLE;
     state.fRtsControl = RTS_CONTROL_DISABLE;
     SetCommState(file, &state);
@@ -93,18 +90,16 @@ bool Serial::open(std::string port, int baud) {
 }
 
 int Serial::read(uint8_t* buffer, int size) {
-    bool succeded = false;
     DWORD bytesRead = 0;
 
-    succeded = ReadFile(file, buffer, size, &bytesRead, 0);
+    ReadFile(file, buffer, size, &bytesRead, nullptr);
     return bytesRead;
 }
 
 int Serial::write(uint8_t* buffer, int size) {
-    bool succeded = false;
     DWORD bytesWritten = 0;
 
-    succeded = WriteFile(file, buffer, size, &bytesWritten, 0);
+    WriteFile(file, buffer, size, &bytesWritten, nullptr);
     return bytesWritten;
 }
 
